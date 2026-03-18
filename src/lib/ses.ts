@@ -191,12 +191,22 @@ export async function sendBulkEmails(
 
     if (result.messageId) {
       sent++;
+      // Record sent event
       await prisma.campaignEvent.create({
         data: {
           campaignId,
           email: email.to,
           eventType: "sent",
           metadata: JSON.stringify({ messageId: result.messageId }),
+        },
+      });
+      // SES accepted the email — mark as delivered
+      await prisma.campaignEvent.create({
+        data: {
+          campaignId,
+          email: email.to,
+          eventType: "delivered",
+          metadata: JSON.stringify({ messageId: result.messageId, timestamp: new Date().toISOString() }),
         },
       });
     } else {

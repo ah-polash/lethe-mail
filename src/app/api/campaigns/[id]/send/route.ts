@@ -139,12 +139,39 @@ export async function POST(
       });
     }
 
+    // Wrap all <a href="..."> links with click tracking redirect
+    function wrapLinksForTracking(html: string, campaignId: string, recipientEmail: string): string {
+      return html.replace(
+        /<a\s([^>]*?)href=["']([^"']+)["']([^>]*?)>/gi,
+        (_match, before, href: string, after) => {
+          // Don't wrap unsubscribe links, mailto:, tel:, or anchor links
+          if (href.includes("/unsubscribe") || href.startsWith("mailto:") || href.startsWith("tel:") || href.startsWith("#")) {
+            return _match;
+          }
+          const trackUrl = `${baseUrl}/api/track/click?c=${campaignId}&e=${encodeURIComponent(recipientEmail)}&url=${encodeURIComponent(href)}`;
+          return `<a ${before}href="${trackUrl}"${after}>`;
+        }
+      );
+    }
+
+    // Append open tracking pixel before </body> or at end
+    function injectOpenPixel(html: string, campaignId: string, recipientEmail: string): string {
+      const pixel = `<img src="${baseUrl}/api/track/open?c=${campaignId}&e=${encodeURIComponent(recipientEmail)}" width="1" height="1" style="display:none" alt="" />`;
+      if (html.includes("</body>")) {
+        return html.replace("</body>", `${pixel}</body>`);
+      }
+      return html + pixel;
+    }
+
     const emails = eligibleEmails.map((email) => {
       const contactData = contactByEmail.get(email) || { email };
+      let htmlBody = resolveMergeTags(campaign.htmlContent, contactData);
+      htmlBody = wrapLinksForTracking(htmlBody, id, email);
+      htmlBody = injectOpenPixel(htmlBody, id, email);
       return {
         to: email,
         subject: resolveMergeTags(campaign.subject, contactData),
-        htmlBody: resolveMergeTags(campaign.htmlContent, contactData),
+        htmlBody,
         fromEmail: campaign.fromEmail,
         fromName: campaign.fromName,
         unsubscribeUrl: `${baseUrl}/unsubscribe?email=${encodeURIComponent(email)}&campaignId=${id}`,
@@ -179,6 +206,7 @@ export async function POST(
       data: {
         totalRecipients: recipientEmails.length,
         totalSent: result.sent,
+        totalDelivered: result.sent, // SES accepted = delivered
         status: "sent",
         sentAt: new Date(),
       },
