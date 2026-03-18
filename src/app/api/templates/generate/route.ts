@@ -212,9 +212,9 @@ function getDefaultTemplate(prompt: string, style: string): { html: string; subj
 
 export async function POST(request: NextRequest) {
   try {
-    await requireAuth();
+    const session = await requireAuth();
 
-    const { prompt, style } = await request.json();
+    const { prompt, style, templateName, templateSubject } = await request.json();
 
     if (!prompt) {
       return NextResponse.json(
@@ -267,6 +267,18 @@ export async function POST(request: NextRequest) {
             // Strip markdown code fences if present
             const cleaned = content.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
             const parsed = JSON.parse(cleaned);
+
+            // Save prompt for future reuse
+            await prisma.aiPrompt.create({
+              data: {
+                prompt,
+                style: style || "professional",
+                name: templateName || null,
+                subject: parsed.subject || templateSubject || null,
+                createdBy: session.id,
+              },
+            }).catch(() => {}); // Don't fail generation if prompt save fails
+
             return NextResponse.json({
               html: parsed.html,
               subject: parsed.subject,
@@ -280,6 +292,18 @@ export async function POST(request: NextRequest) {
 
     // Fallback to default templates
     const result = getDefaultTemplate(prompt, style || "general");
+
+    // Save prompt for future reuse
+    await prisma.aiPrompt.create({
+      data: {
+        prompt,
+        style: style || "professional",
+        name: templateName || null,
+        subject: result.subject || templateSubject || null,
+        createdBy: session.id,
+      },
+    }).catch(() => {});
+
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal server error";

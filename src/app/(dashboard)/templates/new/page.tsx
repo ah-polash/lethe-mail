@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Sparkles, Loader2, Code, Blocks, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, Sparkles, Loader2, Code, Blocks, Eye, EyeOff, History } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -17,8 +17,24 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { EmailEditor, type EmailBlock } from "@/components/email-editor/editor";
 import { toast } from "sonner";
+
+interface SavedPrompt {
+  id: string;
+  prompt: string;
+  style: string;
+  name: string | null;
+  subject: string | null;
+  createdAt: string;
+}
 
 function NewTemplateContent() {
   const router = useRouter();
@@ -39,6 +55,32 @@ function NewTemplateContent() {
   const [aiStyle, setAiStyle] = useState("professional");
   const [generating, setGenerating] = useState(false);
   const [editorBlocks, setEditorBlocks] = useState<EmailBlock[]>([]);
+
+  // Previous prompts
+  const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([]);
+  const [promptsLoading, setPromptsLoading] = useState(false);
+  const [promptsOpen, setPromptsOpen] = useState(false);
+
+  const fetchSavedPrompts = async () => {
+    setPromptsLoading(true);
+    try {
+      const res = await fetch("/api/ai-prompts");
+      if (res.ok) {
+        const data = await res.json();
+        setSavedPrompts(data.prompts || []);
+      }
+    } catch { /* ignore */ }
+    finally { setPromptsLoading(false); }
+  };
+
+  const applyPrompt = (p: SavedPrompt) => {
+    setAiPrompt(p.prompt);
+    setAiStyle(p.style || "professional");
+    if (p.name) setName(p.name);
+    if (p.subject) setSubject(p.subject);
+    setPromptsOpen(false);
+    toast.success("Prompt loaded! Click Generate to create the template.");
+  };
 
   // Update iframe preview when htmlContent changes in HTML mode
   useEffect(() => {
@@ -68,7 +110,7 @@ function NewTemplateContent() {
       const res = await fetch("/api/templates/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: aiPrompt, style: aiStyle }),
+        body: JSON.stringify({ prompt: aiPrompt, style: aiStyle, templateName: name, templateSubject: subject }),
       });
 
       if (res.ok) {
@@ -141,6 +183,57 @@ function NewTemplateContent() {
           <h1 className="text-xl font-semibold">New Template</h1>
         </div>
         <div className="flex items-center gap-2">
+          {showAI && (
+            <Popover open={promptsOpen} onOpenChange={(open) => {
+              setPromptsOpen(open);
+              if (open && savedPrompts.length === 0) fetchSavedPrompts();
+            }}>
+              <PopoverTrigger render={
+                <Button variant="outline" size="sm" className="h-8">
+                  <History className="h-3.5 w-3.5 mr-1.5" />
+                  Use Previous Prompts
+                </Button>
+              } />
+              <PopoverContent align="end" className="w-[420px] p-0">
+                <div className="px-3 pt-3 pb-2">
+                  <p className="text-sm font-medium">Previous Prompts</p>
+                  <p className="text-xs text-muted-foreground">Click a prompt to fill the form</p>
+                </div>
+                <Separator />
+                <ScrollArea className="max-h-[360px]">
+                  {promptsLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : savedPrompts.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-8">
+                      No previous prompts yet. Generate a template to save your first prompt.
+                    </p>
+                  ) : (
+                    <div className="p-1">
+                      {savedPrompts.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => applyPrompt(p)}
+                          className="w-full text-left rounded-md px-3 py-2.5 hover:bg-accent transition-colors"
+                        >
+                          <p className="text-sm line-clamp-2">{p.prompt}</p>
+                          <div className="flex items-center gap-2 mt-1.5">
+                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{p.style}</Badge>
+                            {p.name && <span className="text-[10px] text-muted-foreground truncate max-w-[120px]">{p.name}</span>}
+                            <span className="text-[10px] text-muted-foreground ml-auto">
+                              {new Date(p.createdAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </ScrollArea>
+              </PopoverContent>
+            </Popover>
+          )}
           {isHtmlMode && (
             <Button
               variant="outline"

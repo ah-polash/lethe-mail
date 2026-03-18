@@ -18,6 +18,7 @@ model User {
 
   campaigns      Campaign[]
   templates      EmailTemplate[]
+  aiPrompts      AiPrompt[]
 }
 
 model SesConfig {
@@ -128,4 +129,15 @@ model AiConfig {
   isActive  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model AiPrompt {
+  id        String   @id @default(uuid())
+  prompt    String
+  style     String   @default("professional")
+  name      String?  // template name used
+  subject   String?  // subject used
+  createdBy String
+  creator   User     @relation(fields: [createdBy], references: [id])
+  createdAt DateTime @default(now())
 }
