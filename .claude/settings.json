@@ -1,9 +1,34 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --use-npm)",
-      "Bash(mv .claude /tmp/.claude_backup)",
-      "Bash(npx shadcn@latest init -d)"
+      "Bash",
+      "Read",
+      "Edit",
+      "Write",
+      "WebFetch",
+      "Grep",
+      "Glob",
+      "LS",
+      "MultiEdit",
+      "NotebookRead",
+      "NotebookEdit",
+      "TodoRead",
+      "TodoWrite",
+      "WebSearch",
+      "Bash(ls -la /Users/abuhayat/Desktop/ai_projects/lethe_newsletter_and_mailing_alternative_nextjs_shadcn/src/app/\\\\\\(dashboard\\\\\\)/dashboard/)",
+      "Bash(ls -la /Users/abuhayat/Desktop/ai_projects/lethe_newsletter_and_mailing_alternative_nextjs_shadcn/src/app/\\\\\\(dashboard\\\\\\)/campaigns/)",
+      "Bash(ls -la /Users/abuhayat/Desktop/ai_projects/lethe_newsletter_and_mailing_alternative_nextjs_shadcn/src/app/api/swipeone/[id]/)",
+      "Bash(npx tsc:*)",
+      "Bash(ls /Users/abuhayat/Desktop/ai_projects/lethe_newsletter_and_mailing_alternative_nextjs_shadcn/prisma/seed*)",
+      "Bash(npx tsx:*)",
+      "Bash(find /Users/abuhayat/Desktop/ai_projects/lethe_newsletter_and_mailing_alternative_nextjs_shadcn -path */node_modules -prune -o -type f \\\\\\(-name schema.prisma -o -name *event* -o -name *webhook* \\\\\\) -print)",
+      "Bash(grep -r \"SNS\\\\|SQS\\\\|sns\\\\|sqs\\\\|bounce\\\\|complaint\\\\|delivery\\\\|notification\" /Users/abuhayat/Desktop/ai_projects/lethe_newsletter_and_mailing_alternative_nextjs_shadcn/src --include=*.ts --include=*.tsx)",
+      "Bash(ls /Users/abuhayat/Desktop/ai_projects/lethe_newsletter_and_mailing_alternative_nextjs_shadcn/prisma/*.db)",
+      "Bash(sqlite3 /Users/abuhayat/Desktop/ai_projects/lethe_newsletter_and_mailing_alternative_nextjs_shadcn/prisma/dev.db \".tables\")",
+      "Bash(sqlite3 /Users/abuhayat/Desktop/ai_projects/lethe_newsletter_and_mailing_alternative_nextjs_shadcn/dev.db \".tables\")",
+      "Bash(find /Users/abuhayat/Desktop/ai_projects/lethe_newsletter_and_mailing_alternative_nextjs_shadcn -type f \\\\\\(-name *.prisma -o -name *schema* \\\\\\))",
+      "Bash(find /Users/abuhayat/Desktop/ai_projects/lethe_newsletter_and_mailing_alternative_nextjs_shadcn/src -type f \\\\\\(-name *.ts -o -name *.tsx -o -name *.prisma \\\\\\))",
+      "Bash(find /Users/abuhayat/Desktop/ai_projects/lethe_newsletter_and_mailing_alternative_nextjs_shadcn/src -type f \\\\\\(-name *.ts -o -name *.tsx \\\\\\) -not -path */generated/*)"
     ]
   }
 }

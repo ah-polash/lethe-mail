@@ -1,0 +1,119 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id             String   @id @default(uuid())
+  email          String   @unique
+  name           String
+  passwordHash   String
+  role           String   @default("general_user") // super_admin | general_user
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  campaigns      Campaign[]
+  templates      EmailTemplate[]
+}
+
+model SesConfig {
+  id              String   @id @default(uuid())
+  name            String   @default("Default")
+  region          String
+  accessKeyId     String
+  secretAccessKey String
+  configSetName   String?
+  isActive        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model EmailTemplate {
+  id          String   @id @default(uuid())
+  name        String
+  subject     String
+  htmlContent String
+  jsonContent String?  // For drag-and-drop editor state
+  thumbnail   String?
+  isAiGenerated Boolean @default(false)
+  createdBy   String
+  creator     User     @relation(fields: [createdBy], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  campaigns   Campaign[]
+}
+
+model Campaign {
+  id              String   @id @default(uuid())
+  name            String
+  subject         String
+  fromEmail       String   @default("")
+  fromName        String   @default("")
+  htmlContent     String
+  templateId      String?
+  template        EmailTemplate? @relation(fields: [templateId], references: [id])
+  status          String   @default("draft") // draft | scheduled | sending | sent | failed
+  scheduledAt     DateTime?
+  sentAt          DateTime?
+  totalRecipients Int      @default(0)
+  totalSent       Int      @default(0)
+  totalDelivered  Int      @default(0)
+  totalOpened     Int      @default(0)
+  totalClicked    Int      @default(0)
+  totalBounced    Int      @default(0)
+  totalComplaints Int      @default(0)
+  totalUnsubscribed Int    @default(0)
+  audienceSource  String   @default("internal") // internal | swipeone
+  recipientEmails String?  // JSON array of recipient email addresses
+  segmentIds      String?  // JSON array of SwipeOne segment IDs (future use)
+  segmentNames    String?  // JSON array of segment names for display (future use)
+  createdBy       String
+  creator         User     @relation(fields: [createdBy], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  events          CampaignEvent[]
+}
+
+model CampaignEvent {
+  id         String   @id @default(uuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
+  email      String
+  eventType  String   // sent | delivered | opened | clicked | bounced | complained | unsubscribed
+  metadata   String?  // JSON
+  createdAt  DateTime @default(now())
+}
+
+model Contact {
+  id                    String   @id @default(uuid())
+  email                 String   @unique
+  firstName             String?
+  lastName              String?
+  fullName              String?
+  tags                  String?  // JSON array of tags
+  isMarketingAllowed    Boolean  @default(true)
+  emailMarketingConsent Boolean  @default(false)
+  pluginSlug            String?
+  uninstallFeedback     String?
+  feedbackText          String?
+  properties            String?  // JSON object for extra custom fields
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model SwipeOneConfig {
+  id          String   @id @default(uuid())
+  name        String   @default("Default")
+  apiKey      String
+  baseUrl     String   @default("https://api.swipeone.com")
+  workspaceId String   @default("")
+  isActive    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
