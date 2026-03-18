@@ -79,6 +79,17 @@ interface AiConfigType {
   isActive?: boolean;
 }
 
+interface R2ConfigType {
+  id?: string;
+  name: string;
+  accountId: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  bucketName: string;
+  publicUrl: string;
+  isActive?: boolean;
+}
+
 const emptySes: SesConfig = {
   name: "",
   region: "",
@@ -100,6 +111,15 @@ const emptyAi: AiConfigType = {
   apiKey: "",
   model: "google/gemini-2.0-flash-001",
   baseUrl: "https://openrouter.ai/api/v1",
+};
+
+const emptyR2: R2ConfigType = {
+  name: "",
+  accountId: "",
+  accessKeyId: "",
+  secretAccessKey: "",
+  bucketName: "",
+  publicUrl: "",
 };
 
 export default function SettingsPage() {
@@ -133,6 +153,16 @@ export default function SettingsPage() {
   const [savingAi, setSavingAi] = useState(false);
   const [testingAi, setTestingAi] = useState(false);
   const [showAiApiKey, setShowAiApiKey] = useState(false);
+
+  // R2 Config
+  const [r2Configs, setR2Configs] = useState<R2ConfigType[]>([]);
+  const [r2Form, setR2Form] = useState<R2ConfigType>(emptyR2);
+  const [r2DialogOpen, setR2DialogOpen] = useState(false);
+  const [r2Editing, setR2Editing] = useState(false);
+  const [savingR2, setSavingR2] = useState(false);
+  const [testingR2, setTestingR2] = useState(false);
+  const [showR2AccessKey, setShowR2AccessKey] = useState(false);
+  const [showR2SecretKey, setShowR2SecretKey] = useState(false);
 
   // Users
   const [users, setUsers] = useState<User[]>([]);
@@ -177,6 +207,16 @@ export default function SettingsPage() {
     } catch { /* ignore */ }
   }, []);
 
+  const loadR2Configs = useCallback(async () => {
+    try {
+      const res = await fetch("/api/r2-config");
+      if (res.ok) {
+        const data = await res.json();
+        setR2Configs(data.configs || []);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     async function checkAccess() {
       try {
@@ -199,11 +239,12 @@ export default function SettingsPage() {
     loadSesConfigs();
     loadSwipeoneConfigs();
     loadAiConfigs();
+    loadR2Configs();
     fetch("/api/users")
       .then((r) => r.json())
       .then((d) => setUsers(d.users || []))
       .catch(() => {});
-  }, [loading, loadSesConfigs, loadSwipeoneConfigs, loadAiConfigs]);
+  }, [loading, loadSesConfigs, loadSwipeoneConfigs, loadAiConfigs, loadR2Configs]);
 
   // --- SES Handlers ---
 
@@ -495,6 +536,104 @@ export default function SettingsPage() {
     }
   };
 
+  // --- R2 Config Handlers ---
+
+  const openR2Create = () => {
+    setR2Form(emptyR2);
+    setR2Editing(false);
+    setShowR2AccessKey(false);
+    setShowR2SecretKey(false);
+    setR2DialogOpen(true);
+  };
+
+  const openR2Edit = (config: R2ConfigType) => {
+    setR2Form(config);
+    setR2Editing(true);
+    setShowR2AccessKey(false);
+    setShowR2SecretKey(false);
+    setR2DialogOpen(true);
+  };
+
+  const handleSaveR2 = async () => {
+    if (!r2Form.accountId || !r2Form.accessKeyId || !r2Form.secretAccessKey || !r2Form.bucketName || !r2Form.publicUrl) {
+      toast.error("All fields are required");
+      return;
+    }
+
+    setSavingR2(true);
+    try {
+      const isEdit = r2Editing && r2Form.id;
+      const url = isEdit ? `/api/r2-config/${r2Form.id}` : "/api/r2-config";
+      const method = isEdit ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(r2Form),
+      });
+
+      if (res.ok) {
+        toast.success(isEdit ? "R2 configuration updated" : "R2 configuration created");
+        setR2DialogOpen(false);
+        loadR2Configs();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to save R2 configuration");
+      }
+    } catch {
+      toast.error("Failed to save R2 configuration");
+    } finally {
+      setSavingR2(false);
+    }
+  };
+
+  const handleDeleteR2 = async (id: string) => {
+    try {
+      const res = await fetch(`/api/r2-config/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        toast.success("R2 configuration deleted");
+        loadR2Configs();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to delete");
+      }
+    } catch {
+      toast.error("Failed to delete configuration");
+    }
+  };
+
+  const handleSetActiveR2 = async (id: string) => {
+    try {
+      const res = await fetch(`/api/r2-config/${id}`, { method: "PATCH" });
+      if (res.ok) {
+        toast.success("Active R2 configuration updated");
+        loadR2Configs();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to set active");
+      }
+    } catch {
+      toast.error("Failed to set active configuration");
+    }
+  };
+
+  const handleTestR2 = async () => {
+    setTestingR2(true);
+    try {
+      const res = await fetch("/api/r2-config", { method: "PUT" });
+      if (res.ok) {
+        toast.success("R2 connection successful!");
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "R2 connection failed");
+      }
+    } catch {
+      toast.error("R2 connection test failed");
+    } finally {
+      setTestingR2(false);
+    }
+  };
+
   // --- User Handlers ---
 
   const handleCreateUser = async () => {
@@ -568,6 +707,7 @@ export default function SettingsPage() {
           <TabsTrigger value="ses">SES Connections</TabsTrigger>
           <TabsTrigger value="swipeone">SwipeOne Connections</TabsTrigger>
           <TabsTrigger value="ai">AI Configuration</TabsTrigger>
+          <TabsTrigger value="r2">Cloudflare R2</TabsTrigger>
           <TabsTrigger value="users">User Management</TabsTrigger>
         </TabsList>
 
@@ -1118,6 +1258,177 @@ export default function SettingsPage() {
                 </div>
                 <Button onClick={handleSaveAi} disabled={savingAi} className="w-full">
                   {savingAi ? "Saving..." : aiEditing ? "Update Connection" : "Create Connection"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </TabsContent>
+
+        {/* ===== R2 TAB ===== */}
+        <TabsContent value="r2" className="mt-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Cloudflare R2 Storage</CardTitle>
+                  <CardDescription>
+                    Configure Cloudflare R2 for image uploads (screenshot references for AI email generation).
+                  </CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleTestR2}
+                    disabled={testingR2 || r2Configs.every((c) => !c.isActive)}
+                  >
+                    {testingR2 ? "Testing..." : "Test Active"}
+                  </Button>
+                  <Button onClick={openR2Create}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Connection
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {r2Configs.length === 0 ? (
+                <p className="text-muted-foreground text-sm text-center py-8">
+                  No R2 connections configured. Add one to enable image uploads.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Bucket</TableHead>
+                      <TableHead>Public URL</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {r2Configs.map((config) => (
+                      <TableRow key={config.id}>
+                        <TableCell className="font-medium">{config.name}</TableCell>
+                        <TableCell className="text-muted-foreground text-sm font-mono">{config.bucketName}</TableCell>
+                        <TableCell className="text-muted-foreground text-sm truncate max-w-[200px]">{config.publicUrl}</TableCell>
+                        <TableCell>
+                          {config.isActive ? (
+                            <Badge>Active</Badge>
+                          ) : (
+                            <Badge variant="secondary">Inactive</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            {!config.isActive && (
+                              <Button variant="ghost" size="icon" title="Set as active" onClick={() => handleSetActiveR2(config.id!)}>
+                                <Power className="h-4 w-4" />
+                              </Button>
+                            )}
+                            <Button variant="ghost" size="icon" title="Edit" onClick={() => openR2Edit(config)}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            {!config.isActive && (
+                              <Button variant="ghost" size="icon" title="Delete" onClick={() => handleDeleteR2(config.id!)}>
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* R2 Config Dialog */}
+          <Dialog open={r2DialogOpen} onOpenChange={setR2DialogOpen}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>{r2Editing ? "Edit R2 Connection" : "New R2 Connection"}</DialogTitle>
+                <DialogDescription>
+                  Configure your Cloudflare R2 storage credentials
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 mt-2">
+                <div className="grid gap-4 grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="r2-name">Connection Name</Label>
+                    <Input
+                      id="r2-name"
+                      placeholder="e.g. Production"
+                      value={r2Form.name}
+                      onChange={(e) => setR2Form({ ...r2Form, name: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="r2-account-id">Account ID</Label>
+                    <Input
+                      id="r2-account-id"
+                      placeholder="Your Cloudflare Account ID"
+                      value={r2Form.accountId}
+                      onChange={(e) => setR2Form({ ...r2Form, accountId: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="r2-access-key">Access Key ID</Label>
+                  <div className="relative">
+                    <Input
+                      id="r2-access-key"
+                      type={showR2AccessKey ? "text" : "password"}
+                      placeholder="R2 Access Key ID"
+                      value={r2Form.accessKeyId}
+                      onChange={(e) => setR2Form({ ...r2Form, accessKeyId: e.target.value })}
+                    />
+                    <Button type="button" variant="ghost" size="icon" className="absolute right-0 top-0 h-full px-3 hover:bg-transparent" onClick={() => setShowR2AccessKey(!showR2AccessKey)}>
+                      {showR2AccessKey ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
+                    </Button>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="r2-secret-key">Secret Access Key</Label>
+                  <div className="relative">
+                    <Input
+                      id="r2-secret-key"
+                      type={showR2SecretKey ? "text" : "password"}
+                      placeholder="R2 Secret Access Key"
+                      value={r2Form.secretAccessKey}
+                      onChange={(e) => setR2Form({ ...r2Form, secretAccessKey: e.target.value })}
+                    />
+                    <Button type="button" variant="ghost" size="icon" className="absolute right-0 top-0 h-full px-3 hover:bg-transparent" onClick={() => setShowR2SecretKey(!showR2SecretKey)}>
+                      {showR2SecretKey ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
+                    </Button>
+                  </div>
+                </div>
+                <div className="grid gap-4 grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="r2-bucket">Bucket Name</Label>
+                    <Input
+                      id="r2-bucket"
+                      placeholder="my-bucket"
+                      value={r2Form.bucketName}
+                      onChange={(e) => setR2Form({ ...r2Form, bucketName: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="r2-public-url">Public URL</Label>
+                    <Input
+                      id="r2-public-url"
+                      placeholder="https://pub-xxx.r2.dev"
+                      value={r2Form.publicUrl}
+                      onChange={(e) => setR2Form({ ...r2Form, publicUrl: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Find your credentials in Cloudflare Dashboard &rarr; R2 &rarr; Manage R2 API Tokens. The Public URL is your bucket&apos;s public access domain (enable it in bucket settings).
+                </p>
+                <Button onClick={handleSaveR2} disabled={savingR2} className="w-full">
+                  {savingR2 ? "Saving..." : r2Editing ? "Update Connection" : "Create Connection"}
                 </Button>
               </div>
             </DialogContent>

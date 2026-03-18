@@ -131,13 +131,27 @@ model AiConfig {
   updatedAt DateTime @updatedAt
 }
 
+model R2Config {
+  id              String   @id @default(uuid())
+  name            String   @default("Default")
+  accountId       String
+  accessKeyId     String
+  secretAccessKey String
+  bucketName      String
+  publicUrl       String   // e.g. https://pub-xxx.r2.dev or custom domain
+  isActive        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
 model AiPrompt {
-  id        String   @id @default(uuid())
-  prompt    String
-  style     String   @default("professional")
-  name      String?  // template name used
-  subject   String?  // subject used
-  createdBy String
-  creator   User     @relation(fields: [createdBy], references: [id])
-  createdAt DateTime @default(now())
+  id                String   @id @default(uuid())
+  prompt            String
+  style             String   @default("professional")
+  name              String?  // template name used
+  subject           String?  // subject used
+  referenceImageUrl String?  // screenshot reference image URL
+  createdBy         String
+  creator           User     @relation(fields: [createdBy], references: [id])
+  createdAt         DateTime @default(now())
 }

@@ -214,7 +214,7 @@ export async function POST(request: NextRequest) {
   try {
     const session = await requireAuth();
 
-    const { prompt, style, templateName, templateSubject } = await request.json();
+    const { prompt, style, templateName, templateSubject, referenceImageUrl } = await request.json();
 
     if (!prompt) {
       return NextResponse.json(
@@ -248,11 +248,18 @@ export async function POST(request: NextRequest) {
             messages: [
               {
                 role: "system",
-                content: `You are an expert email template designer. Generate a professional, responsive HTML email template based on the user's prompt. The style should be "${style || "general"}". Return a JSON object with two fields: "html" (the complete HTML email template) and "subject" (a suggested email subject line). The HTML should be inline-styled for maximum email client compatibility. Make the design modern, clean, and professional. Only return valid JSON, no markdown.`,
+                content: referenceImageUrl
+                  ? `You are an expert email template designer. The user has provided a screenshot of an email design as a reference. Analyze the screenshot carefully and recreate a similar email template in HTML. Match the layout, colors, typography, spacing, and overall design as closely as possible. Adapt the content based on the user's prompt. The style should be "${style || "general"}". Return a JSON object with two fields: "html" (the complete HTML email template with all styles inline for email client compatibility) and "subject" (a suggested email subject line). Only return valid JSON, no markdown.`
+                  : `You are an expert email template designer. Generate a professional, responsive HTML email template based on the user's prompt. The style should be "${style || "general"}". Return a JSON object with two fields: "html" (the complete HTML email template) and "subject" (a suggested email subject line). The HTML should be inline-styled for maximum email client compatibility. Make the design modern, clean, and professional. Only return valid JSON, no markdown.`,
               },
               {
                 role: "user",
-                content: prompt,
+                content: referenceImageUrl
+                  ? [
+                      { type: "text", text: prompt || "Recreate this email design as an HTML email template." },
+                      { type: "image_url", image_url: { url: referenceImageUrl } },
+                    ]
+                  : prompt,
               },
             ],
             temperature: 0.7,
@@ -275,6 +282,7 @@ export async function POST(request: NextRequest) {
                 style: style || "professional",
                 name: templateName || null,
                 subject: parsed.subject || templateSubject || null,
+                referenceImageUrl: referenceImageUrl || null,
                 createdBy: session.id,
               },
             }).catch(() => {}); // Don't fail generation if prompt save fails

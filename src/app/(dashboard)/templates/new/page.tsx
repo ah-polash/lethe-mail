@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Sparkles, Loader2, Code, Blocks, Eye, EyeOff, History } from "lucide-react";
+import { ArrowLeft, Sparkles, Loader2, Code, Blocks, Eye, EyeOff, History, Upload, X, ImageIcon } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -39,7 +39,9 @@ interface SavedPrompt {
 function NewTemplateContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const showAI = searchParams.get("ai") === "true";
+  const aiMode = searchParams.get("ai"); // "true" | "screenshot" | null
+  const showAI = aiMode === "true" || aiMode === "screenshot";
+  const isScreenshotMode = aiMode === "screenshot";
 
   const [name, setName] = useState("");
   const [subject, setSubject] = useState("");
@@ -73,6 +75,47 @@ function NewTemplateContent() {
     finally { setPromptsLoading(false); }
   };
 
+  // Screenshot / image upload
+  const [referenceImageUrl, setReferenceImageUrl] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImageUpload = async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      toast.error("Only image files are allowed");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error("Image must be under 10MB");
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      if (res.ok) {
+        const data = await res.json();
+        setReferenceImageUrl(data.url);
+        toast.success("Image uploaded");
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Upload failed");
+      }
+    } catch {
+      toast.error("Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) handleImageUpload(file);
+  };
+
   const applyPrompt = (p: SavedPrompt) => {
     setAiPrompt(p.prompt);
     setAiStyle(p.style || "professional");
@@ -100,8 +143,8 @@ function NewTemplateContent() {
   };
 
   const handleGenerateAI = async () => {
-    if (!aiPrompt) {
-      toast.error("Please enter a prompt");
+    if (!aiPrompt && !referenceImageUrl) {
+      toast.error("Please enter a prompt or upload a screenshot");
       return;
     }
 
@@ -110,7 +153,13 @@ function NewTemplateContent() {
       const res = await fetch("/api/templates/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: aiPrompt, style: aiStyle, templateName: name, templateSubject: subject }),
+        body: JSON.stringify({
+          prompt: aiPrompt || "Recreate this email design as an HTML email template.",
+          style: aiStyle,
+          templateName: name,
+          templateSubject: subject,
+          ...(referenceImageUrl && { referenceImageUrl }),
+        }),
       });
 
       if (res.ok) {
@@ -180,7 +229,9 @@ function NewTemplateContent() {
           <Link href="/templates" className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8")}>
             <ArrowLeft className="h-4 w-4" />
           </Link>
-          <h1 className="text-xl font-semibold">New Template</h1>
+          <h1 className="text-xl font-semibold">
+            {isScreenshotMode ? "Screenshot to AI Email" : "New Template"}
+          </h1>
         </div>
         <div className="flex items-center gap-2">
           {showAI && (
@@ -282,13 +333,75 @@ function NewTemplateContent() {
               <Separator />
               <div className="space-y-3">
                 <div className="flex items-center gap-2 text-sm font-medium">
-                  <Sparkles className="h-4 w-4" />
-                  AI Template Generator
+                  {isScreenshotMode ? <ImageIcon className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+                  {isScreenshotMode ? "Screenshot to AI Email" : "AI Template Generator"}
                 </div>
+
+                {/* Screenshot upload area */}
+                {isScreenshotMode && (
+                  <div className="space-y-2">
+                    <Label>Design Reference Screenshot</Label>
+                    {referenceImageUrl ? (
+                      <div className="relative inline-block">
+                        <img
+                          src={referenceImageUrl}
+                          alt="Reference"
+                          className="max-h-[200px] border object-contain bg-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setReferenceImageUrl("")}
+                          className="absolute -top-2 -right-2 h-6 w-6 flex items-center justify-center bg-destructive text-white text-xs hover:bg-destructive/90 transition-colors"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div
+                        onDrop={handleDrop}
+                        onDragOver={(e) => e.preventDefault()}
+                        onClick={() => fileInputRef.current?.click()}
+                        className="border-2 border-dashed p-6 text-center cursor-pointer hover:border-primary/50 hover:bg-accent/50 transition-colors"
+                      >
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleImageUpload(file);
+                            e.target.value = "";
+                          }}
+                        />
+                        {uploading ? (
+                          <div className="flex flex-col items-center gap-2">
+                            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                            <p className="text-sm text-muted-foreground">Uploading...</p>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center gap-2">
+                            <Upload className="h-8 w-8 text-muted-foreground" />
+                            <p className="text-sm text-muted-foreground">
+                              Drop an image here or click to upload
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              PNG, JPG, GIF, WebP up to 10MB
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex items-start gap-3">
                   <Textarea
                     id="ai-prompt"
-                    placeholder="e.g. A welcome email for new SaaS subscribers with a CTA to start their free trial"
+                    placeholder={isScreenshotMode
+                      ? "Describe any changes you want (or leave empty to recreate the screenshot as-is)"
+                      : "e.g. A welcome email for new SaaS subscribers with a CTA to start their free trial"
+                    }
                     value={aiPrompt}
                     onChange={(e) => setAiPrompt(e.target.value)}
                     rows={2}
@@ -307,7 +420,12 @@ function NewTemplateContent() {
                         <SelectItem value="elegant">Elegant</SelectItem>
                       </SelectContent>
                     </Select>
-                    <Button onClick={handleGenerateAI} disabled={generating} size="sm" className="h-9">
+                    <Button
+                      onClick={handleGenerateAI}
+                      disabled={generating || (isScreenshotMode && !referenceImageUrl && !aiPrompt)}
+                      size="sm"
+                      className="h-9"
+                    >
                       {generating ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
                       {generating ? "Generating..." : "Generate"}
                     </Button>
