@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
+import { prisma } from "@/lib/db";
 
 function getDefaultTemplate(prompt: string, style: string): { html: string; subject: string } {
   const baseStyles = `
@@ -222,18 +223,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const openaiKey = process.env.OPENAI_API_KEY;
+    // Try DB-configured AI provider first (OpenRouter, OpenAI, etc.)
+    const aiConfig = await prisma.aiConfig.findFirst({ where: { isActive: true } });
 
-    if (openaiKey) {
+    // Fall back to env var for backwards compatibility
+    const apiKey = aiConfig?.apiKey || process.env.OPENAI_API_KEY;
+    const baseUrl = aiConfig?.baseUrl || "https://api.openai.com/v1";
+    const model = aiConfig?.model || "gpt-4o-mini";
+
+    if (apiKey) {
       try {
-        const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        const response = await fetch(`${baseUrl}/chat/completions`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${openaiKey}`,
+            Authorization: `Bearer ${apiKey}`,
+            ...(aiConfig?.provider === "openrouter" && {
+              "HTTP-Referer": process.env.NEXTAUTH_URL || "http://localhost:3000",
+              "X-Title": "Lethe Mail",
+            }),
           },
           body: JSON.stringify({
-            model: "gpt-4o-mini",
+            model,
             messages: [
               {
                 role: "system",
@@ -253,7 +264,9 @@ export async function POST(request: NextRequest) {
           const data = await response.json();
           const content = data.choices?.[0]?.message?.content;
           if (content) {
-            const parsed = JSON.parse(content);
+            // Strip markdown code fences if present
+            const cleaned = content.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+            const parsed = JSON.parse(cleaned);
             return NextResponse.json({
               html: parsed.html,
               subject: parsed.subject,

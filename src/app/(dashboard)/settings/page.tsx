@@ -69,6 +69,16 @@ interface SwipeOneConfig {
   isActive?: boolean;
 }
 
+interface AiConfigType {
+  id?: string;
+  name: string;
+  provider: string;
+  apiKey: string;
+  model: string;
+  baseUrl: string;
+  isActive?: boolean;
+}
+
 const emptySes: SesConfig = {
   name: "",
   region: "",
@@ -82,6 +92,14 @@ const emptySwipeone: SwipeOneConfig = {
   apiKey: "",
   baseUrl: "https://api.swipeone.com",
   workspaceId: "",
+};
+
+const emptyAi: AiConfigType = {
+  name: "",
+  provider: "openrouter",
+  apiKey: "",
+  model: "google/gemini-2.0-flash-001",
+  baseUrl: "https://openrouter.ai/api/v1",
 };
 
 export default function SettingsPage() {
@@ -106,6 +124,15 @@ export default function SettingsPage() {
   const [savingSwipeone, setSavingSwipeone] = useState(false);
   const [testingSwipeone, setTestingSwipeone] = useState(false);
   const [showSwipeoneApiKey, setShowSwipeoneApiKey] = useState(false);
+
+  // AI Config
+  const [aiConfigs, setAiConfigs] = useState<AiConfigType[]>([]);
+  const [aiForm, setAiForm] = useState<AiConfigType>(emptyAi);
+  const [aiDialogOpen, setAiDialogOpen] = useState(false);
+  const [aiEditing, setAiEditing] = useState(false);
+  const [savingAi, setSavingAi] = useState(false);
+  const [testingAi, setTestingAi] = useState(false);
+  const [showAiApiKey, setShowAiApiKey] = useState(false);
 
   // Users
   const [users, setUsers] = useState<User[]>([]);
@@ -140,6 +167,16 @@ export default function SettingsPage() {
     } catch { /* ignore */ }
   }, []);
 
+  const loadAiConfigs = useCallback(async () => {
+    try {
+      const res = await fetch("/api/ai-config");
+      if (res.ok) {
+        const data = await res.json();
+        setAiConfigs(data.configs || []);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     async function checkAccess() {
       try {
@@ -161,11 +198,12 @@ export default function SettingsPage() {
     if (loading) return;
     loadSesConfigs();
     loadSwipeoneConfigs();
+    loadAiConfigs();
     fetch("/api/users")
       .then((r) => r.json())
       .then((d) => setUsers(d.users || []))
       .catch(() => {});
-  }, [loading, loadSesConfigs, loadSwipeoneConfigs]);
+  }, [loading, loadSesConfigs, loadSwipeoneConfigs, loadAiConfigs]);
 
   // --- SES Handlers ---
 
@@ -361,6 +399,102 @@ export default function SettingsPage() {
     }
   };
 
+  // --- AI Config Handlers ---
+
+  const openAiCreate = () => {
+    setAiForm(emptyAi);
+    setAiEditing(false);
+    setShowAiApiKey(false);
+    setAiDialogOpen(true);
+  };
+
+  const openAiEdit = (config: AiConfigType) => {
+    setAiForm(config);
+    setAiEditing(true);
+    setShowAiApiKey(false);
+    setAiDialogOpen(true);
+  };
+
+  const handleSaveAi = async () => {
+    if (!aiForm.apiKey) {
+      toast.error("API key is required");
+      return;
+    }
+
+    setSavingAi(true);
+    try {
+      const isEdit = aiEditing && aiForm.id;
+      const url = isEdit ? `/api/ai-config/${aiForm.id}` : "/api/ai-config";
+      const method = isEdit ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(aiForm),
+      });
+
+      if (res.ok) {
+        toast.success(isEdit ? "AI configuration updated" : "AI configuration created");
+        setAiDialogOpen(false);
+        loadAiConfigs();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to save AI configuration");
+      }
+    } catch {
+      toast.error("Failed to save AI configuration");
+    } finally {
+      setSavingAi(false);
+    }
+  };
+
+  const handleDeleteAi = async (id: string) => {
+    try {
+      const res = await fetch(`/api/ai-config/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        toast.success("AI configuration deleted");
+        loadAiConfigs();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to delete");
+      }
+    } catch {
+      toast.error("Failed to delete configuration");
+    }
+  };
+
+  const handleSetActiveAi = async (id: string) => {
+    try {
+      const res = await fetch(`/api/ai-config/${id}`, { method: "PATCH" });
+      if (res.ok) {
+        toast.success("Active AI configuration updated");
+        loadAiConfigs();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to set active");
+      }
+    } catch {
+      toast.error("Failed to set active configuration");
+    }
+  };
+
+  const handleTestAi = async () => {
+    setTestingAi(true);
+    try {
+      const res = await fetch("/api/ai-config", { method: "PUT" });
+      if (res.ok) {
+        toast.success("AI connection successful!");
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "AI connection failed");
+      }
+    } catch {
+      toast.error("AI connection test failed");
+    } finally {
+      setTestingAi(false);
+    }
+  };
+
   // --- User Handlers ---
 
   const handleCreateUser = async () => {
@@ -433,6 +567,7 @@ export default function SettingsPage() {
         <TabsList>
           <TabsTrigger value="ses">SES Connections</TabsTrigger>
           <TabsTrigger value="swipeone">SwipeOne Connections</TabsTrigger>
+          <TabsTrigger value="ai">AI Configuration</TabsTrigger>
           <TabsTrigger value="users">User Management</TabsTrigger>
         </TabsList>
 
@@ -780,6 +915,209 @@ export default function SettingsPage() {
                 </p>
                 <Button onClick={handleSaveSwipeone} disabled={savingSwipeone} className="w-full">
                   {savingSwipeone ? "Saving..." : swipeoneEditing ? "Update Connection" : "Create Connection"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </TabsContent>
+
+        {/* ===== AI TAB ===== */}
+        <TabsContent value="ai" className="mt-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>AI Configuration</CardTitle>
+                  <CardDescription>
+                    Configure your AI provider for email template generation. Supports OpenRouter (access to 100+ models) and OpenAI.
+                  </CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleTestAi}
+                    disabled={testingAi || aiConfigs.every((c) => !c.isActive)}
+                  >
+                    {testingAi ? "Testing..." : "Test Active"}
+                  </Button>
+                  <Button onClick={openAiCreate}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Connection
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {aiConfigs.length === 0 ? (
+                <p className="text-muted-foreground text-sm text-center py-8">
+                  No AI connections configured. Add one to enable AI-powered email generation.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Provider</TableHead>
+                      <TableHead>Model</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {aiConfigs.map((config) => (
+                      <TableRow key={config.id}>
+                        <TableCell className="font-medium">{config.name}</TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className="capitalize">{config.provider}</Badge>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-sm font-mono">{config.model}</TableCell>
+                        <TableCell>
+                          {config.isActive ? (
+                            <Badge>Active</Badge>
+                          ) : (
+                            <Badge variant="secondary">Inactive</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            {!config.isActive && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                title="Set as active"
+                                onClick={() => handleSetActiveAi(config.id!)}
+                              >
+                                <Power className="h-4 w-4" />
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Edit"
+                              onClick={() => openAiEdit(config)}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            {!config.isActive && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                title="Delete"
+                                onClick={() => handleDeleteAi(config.id!)}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* AI Config Dialog */}
+          <Dialog open={aiDialogOpen} onOpenChange={setAiDialogOpen}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>{aiEditing ? "Edit AI Connection" : "New AI Connection"}</DialogTitle>
+                <DialogDescription>
+                  Configure your AI provider credentials for email generation
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 mt-2">
+                <div className="grid gap-4 grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="ai-name">Connection Name</Label>
+                    <Input
+                      id="ai-name"
+                      placeholder="e.g. OpenRouter Production"
+                      value={aiForm.name}
+                      onChange={(e) => setAiForm({ ...aiForm, name: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="ai-provider">Provider</Label>
+                    <Select
+                      value={aiForm.provider}
+                      onValueChange={(v) => {
+                        const provider = v || "openrouter";
+                        const baseUrl = provider === "openai" ? "https://api.openai.com/v1" : "https://openrouter.ai/api/v1";
+                        const model = provider === "openai" ? "gpt-4o-mini" : "google/gemini-2.0-flash-001";
+                        setAiForm({ ...aiForm, provider, baseUrl, model });
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="openrouter">OpenRouter</SelectItem>
+                        <SelectItem value="openai">OpenAI</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ai-api-key">API Key</Label>
+                  <div className="relative">
+                    <Input
+                      id="ai-api-key"
+                      type={showAiApiKey ? "text" : "password"}
+                      placeholder={aiForm.provider === "openai" ? "sk-..." : "sk-or-v1-..."}
+                      value={aiForm.apiKey}
+                      onChange={(e) => setAiForm({ ...aiForm, apiKey: e.target.value })}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                      onClick={() => setShowAiApiKey(!showAiApiKey)}
+                    >
+                      {showAiApiKey ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
+                    </Button>
+                  </div>
+                  {aiForm.provider === "openrouter" && (
+                    <p className="text-xs text-muted-foreground">
+                      Get your API key from{" "}
+                      <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                        openrouter.ai/keys
+                      </a>
+                    </p>
+                  )}
+                </div>
+                <div className="grid gap-4 grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="ai-model">Model</Label>
+                    <Input
+                      id="ai-model"
+                      placeholder={aiForm.provider === "openai" ? "gpt-4o-mini" : "google/gemini-2.0-flash-001"}
+                      value={aiForm.model}
+                      onChange={(e) => setAiForm({ ...aiForm, model: e.target.value })}
+                    />
+                    {aiForm.provider === "openrouter" && (
+                      <p className="text-xs text-muted-foreground">
+                        Browse models at{" "}
+                        <a href="https://openrouter.ai/models" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                          openrouter.ai/models
+                        </a>
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="ai-base-url">Base URL</Label>
+                    <Input
+                      id="ai-base-url"
+                      placeholder="https://openrouter.ai/api/v1"
+                      value={aiForm.baseUrl}
+                      onChange={(e) => setAiForm({ ...aiForm, baseUrl: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <Button onClick={handleSaveAi} disabled={savingAi} className="w-full">
+                  {savingAi ? "Saving..." : aiEditing ? "Update Connection" : "Create Connection"}
                 </Button>
               </div>
             </DialogContent>

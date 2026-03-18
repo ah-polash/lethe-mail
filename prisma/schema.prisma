@@ -117,3 +117,15 @@ model SwipeOneConfig {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
+
+model AiConfig {
+  id        String   @id @default(uuid())
+  name      String   @default("Default")
+  provider  String   @default("openrouter") // openrouter | openai
+  apiKey    String
+  model     String   @default("google/gemini-2.0-flash-001")
+  baseUrl   String   @default("https://openrouter.ai/api/v1")
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
