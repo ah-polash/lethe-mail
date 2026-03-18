@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Code, Blocks, Eye, EyeOff } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -18,14 +18,6 @@ import { Label } from "@/components/ui/label";
 import { EmailEditor, type EmailBlock } from "@/components/email-editor/editor";
 import { toast } from "sonner";
 
-interface Template {
-  id: string;
-  name: string;
-  subject: string;
-  htmlContent: string;
-  jsonContent: string;
-}
-
 export default function EditTemplatePage() {
   const router = useRouter();
   const params = useParams();
@@ -38,6 +30,9 @@ export default function EditTemplatePage() {
   const [htmlContent, setHtmlContent] = useState("");
   const [jsonContent, setJsonContent] = useState("");
   const [editorBlocks, setEditorBlocks] = useState<EmailBlock[]>([]);
+  const [isHtmlMode, setIsHtmlMode] = useState(false);
+  const [showPreview, setShowPreview] = useState(true);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
     async function fetchTemplate() {
@@ -54,12 +49,18 @@ export default function EditTemplatePage() {
         setSubject(t.subject || "");
         setHtmlContent(t.htmlContent || "");
         setJsonContent(t.jsonContent || "");
+
+        // If template has jsonContent, use block editor; otherwise use HTML mode
         if (t.jsonContent) {
           try {
             setEditorBlocks(JSON.parse(t.jsonContent));
+            setIsHtmlMode(false);
           } catch {
             setEditorBlocks([]);
+            setIsHtmlMode(true);
           }
+        } else {
+          setIsHtmlMode(true);
         }
       } catch {
         toast.error("Failed to load template");
@@ -69,6 +70,18 @@ export default function EditTemplatePage() {
     }
     fetchTemplate();
   }, [templateId, router]);
+
+  // Update iframe preview when htmlContent changes in HTML mode
+  useEffect(() => {
+    if (isHtmlMode && showPreview && iframeRef.current) {
+      const doc = iframeRef.current.contentDocument;
+      if (doc) {
+        doc.open();
+        doc.write(htmlContent);
+        doc.close();
+      }
+    }
+  }, [htmlContent, isHtmlMode, showPreview]);
 
   const handleEditorChange = (data: { html: string; json: string }) => {
     setHtmlContent(data.html);
@@ -86,7 +99,12 @@ export default function EditTemplatePage() {
       const res = await fetch(`/api/templates/${templateId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, subject, htmlContent, jsonContent }),
+        body: JSON.stringify({
+          name,
+          subject,
+          htmlContent,
+          jsonContent: isHtmlMode ? "" : jsonContent,
+        }),
       });
 
       if (res.ok) {
@@ -151,16 +169,70 @@ export default function EditTemplatePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Email Content</CardTitle>
-          <CardDescription>
-            Edit your email template
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Email Content</CardTitle>
+              <CardDescription>
+                {isHtmlMode ? "Edit raw HTML" : "Edit your email template"}
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              {isHtmlMode && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowPreview(!showPreview)}
+                >
+                  {showPreview ? <EyeOff className="h-4 w-4 mr-1.5" /> : <Eye className="h-4 w-4 mr-1.5" />}
+                  {showPreview ? "Hide Preview" : "Show Preview"}
+                </Button>
+              )}
+              {jsonContent && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsHtmlMode(!isHtmlMode)}
+                >
+                  {isHtmlMode ? <Blocks className="h-4 w-4 mr-1.5" /> : <Code className="h-4 w-4 mr-1.5" />}
+                  {isHtmlMode ? "Block Editor" : "HTML Editor"}
+                </Button>
+              )}
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
-          <EmailEditor
-            initialBlocks={editorBlocks}
-            onChange={handleEditorChange}
-          />
+          {isHtmlMode ? (
+            <div className={`grid gap-4 ${showPreview ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1"}`}>
+              <div className="space-y-2">
+                <Label>HTML Code</Label>
+                <textarea
+                  value={htmlContent}
+                  onChange={(e) => setHtmlContent(e.target.value)}
+                  className="w-full min-h-[500px] font-mono text-sm p-4 rounded-lg border bg-muted/50 focus:outline-none focus:ring-2 focus:ring-ring resize-y"
+                  spellCheck={false}
+                />
+              </div>
+              {showPreview && (
+                <div className="space-y-2">
+                  <Label>Preview</Label>
+                  <div className="border rounded-lg overflow-hidden bg-white" style={{ minHeight: "500px" }}>
+                    <iframe
+                      ref={iframeRef}
+                      title="Email Preview"
+                      className="w-full border-0"
+                      style={{ height: "500px" }}
+                      sandbox="allow-same-origin"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <EmailEditor
+              initialBlocks={editorBlocks}
+              onChange={handleEditorChange}
+            />
+          )}
         </CardContent>
       </Card>
 

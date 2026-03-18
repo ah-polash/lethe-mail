@@ -78,6 +78,30 @@ export async function GET(request: NextRequest) {
   }
 }
 
+export async function DELETE(request: NextRequest) {
+  try {
+    await requireSuperAdmin();
+
+    const body = await request.json();
+    const { ids } = body as { ids: string[] };
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return NextResponse.json({ error: "ids array is required" }, { status: 400 });
+    }
+
+    const result = await prisma.contact.deleteMany({
+      where: { id: { in: ids } },
+    });
+
+    return NextResponse.json({ deleted: result.count });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Internal server error";
+    if (message === "Unauthorized") return NextResponse.json({ error: message }, { status: 401 });
+    if (message === "Forbidden") return NextResponse.json({ error: message }, { status: 403 });
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     await requireSuperAdmin();

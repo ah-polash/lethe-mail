@@ -16,6 +16,16 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -40,6 +50,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -285,6 +296,42 @@ export default function ContactsPage() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed");
     } finally { setAddLoading(false); }
+  };
+
+  // ─── Delete ───────────────────────────────────────────
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<string[] | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const confirmDelete = (ids: string[]) => {
+    setDeleteTarget(ids);
+    setDeleteOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget || deleteTarget.length === 0) return;
+    setDeleting(true);
+    try {
+      const res = await fetch("/api/contacts", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: deleteTarget }),
+      });
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.error || "Failed to delete");
+      }
+      const data = await res.json();
+      toast.success(`Deleted ${data.deleted} contact${data.deleted !== 1 ? "s" : ""}`);
+      setSelectedIds(new Set());
+      fetchContacts();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete");
+    } finally {
+      setDeleting(false);
+      setDeleteOpen(false);
+      setDeleteTarget(null);
+    }
   };
 
   // ─── Selection ─────────────────────────────────────────
@@ -600,6 +647,13 @@ export default function ContactsPage() {
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
 
+          {selectedIds.size > 0 && (
+            <Button variant="destructive" size="sm" className="h-9" onClick={() => confirmDelete(Array.from(selectedIds))}>
+              <Trash2 className="h-4 w-4 mr-1.5" />
+              Delete ({selectedIds.size})
+            </Button>
+          )}
+
           {/* Columns popover */}
           <Popover>
             <PopoverTrigger render={<Button variant="outline" size="sm" className="h-9"><SlidersHorizontal className="h-4 w-4 mr-1.5" />Columns</Button>} />
@@ -722,6 +776,8 @@ export default function ContactsPage() {
                     {col.label}
                   </th>
                 ))}
+                <th className="h-10 px-2 text-right align-middle whitespace-nowrap text-xs font-semibold uppercase tracking-wider bg-muted/80 text-muted-foreground w-10">
+                </th>
               </tr>
             </thead>
             <tbody className="[&_tr:last-child]:border-0">
@@ -750,6 +806,16 @@ export default function ContactsPage() {
                         )}
                       </td>
                     ))}
+                    <td className="p-2 align-middle whitespace-nowrap text-right w-10">
+                      <button
+                        type="button"
+                        onClick={() => confirmDelete([contact.id])}
+                        className="inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                        title="Delete contact"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -801,6 +867,24 @@ export default function ContactsPage() {
           </div>
         </div>
       )}
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {deleteTarget?.length === 1 ? "Contact" : "Contacts"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete {deleteTarget?.length === 1 ? "this contact" : `${deleteTarget?.length} contacts`}? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
