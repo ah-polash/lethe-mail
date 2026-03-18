@@ -34,6 +34,14 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 
+interface FailedEvent {
+  id: string;
+  email: string;
+  eventType: string;
+  metadata: string | null;
+  createdAt: string;
+}
+
 interface CampaignData {
   id: string;
   name: string;
@@ -45,6 +53,7 @@ interface CampaignData {
   totalComplaints: number;
   totalUnsubscribed: number;
   eventCounts: Record<string, number>;
+  failedEvents: FailedEvent[];
 }
 
 interface CampaignEvent {
@@ -115,12 +124,15 @@ export default function CampaignReportPage() {
   const total = stats.sent || 1;
   const pct = (value: number) => ((value / total) * 100).toFixed(1);
 
+  const failed = ec["failed"] || 0;
+
   const statCards = [
     { label: "Sent", value: stats.sent, icon: Send, color: "text-blue-500" },
     { label: "Delivered", value: stats.delivered, icon: CheckCircle, color: "text-green-500" },
     { label: "Opened", value: stats.opened, icon: Eye, color: "text-purple-500" },
     { label: "Clicked", value: stats.clicked, icon: MousePointer, color: "text-indigo-500" },
     { label: "Bounced", value: stats.bounced, icon: AlertTriangle, color: "text-orange-500" },
+    ...(failed > 0 ? [{ label: "Failed", value: failed, icon: AlertTriangle, color: "text-red-500" }] : []),
     { label: "Complaints", value: stats.complaints, icon: MessageSquareWarning, color: "text-red-500" },
     { label: "Unsubscribed", value: stats.unsubscribed, icon: UserMinus, color: "text-gray-500" },
   ];
@@ -219,14 +231,63 @@ export default function CampaignReportPage() {
         </Card>
       )}
 
-      {/* Hint when delivery metrics are missing */}
-      {stats.delivered === 0 && stats.sent > 0 && (
+      {/* Failed / Bounced / Complained Log */}
+      {campaign.failedEvents && campaign.failedEvents.length > 0 && (
         <Card>
-          <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">
-              <AlertTriangle className="h-4 w-4 inline mr-1 text-orange-500" />
-              Delivery, open, and click tracking require an SES Configuration Set with SNS event destination pointing to your public webhook URL (<code>/api/webhooks/ses</code>). These metrics will populate once SES can deliver event notifications.
-            </p>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Failed Delivery Log
+            </CardTitle>
+            <CardDescription>{campaign.failedEvents.length} issue{campaign.failedEvents.length > 1 ? "s" : ""} found</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Reason</TableHead>
+                  <TableHead>Time</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {campaign.failedEvents.map((event) => {
+                  let reason = "Unknown";
+                  try {
+                    const meta = JSON.parse(event.metadata || "{}");
+                    if (meta.error) {
+                      reason = meta.error;
+                    } else if (meta.bounceType) {
+                      reason = `${meta.bounceType}${meta.bounceSubType ? ` — ${meta.bounceSubType}` : ""}`;
+                    } else if (meta.complaintFeedbackType) {
+                      reason = meta.complaintFeedbackType;
+                    }
+                  } catch { /* ignore */ }
+
+                  const badgeColor = event.eventType === "failed"
+                    ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                    : event.eventType === "bounced"
+                    ? "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200"
+                    : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200";
+
+                  return (
+                    <TableRow key={event.id}>
+                      <TableCell className="font-mono text-sm">{event.email}</TableCell>
+                      <TableCell>
+                        <span className={`inline-flex items-center px-2 py-0.5 text-xs font-medium ${badgeColor}`}>
+                          {event.eventType}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground max-w-md truncate" title={reason}>{reason}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                        {new Date(event.createdAt).toLocaleString()}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
           </CardContent>
         </Card>
       )}

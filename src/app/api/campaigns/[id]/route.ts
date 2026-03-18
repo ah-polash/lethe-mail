@@ -36,8 +36,19 @@ export async function GET(
       eventCounts[event.eventType] = (eventCounts[event.eventType] || 0) + 1;
     }
 
+    // Include failed/bounced/complained events with full details for the log
+    const failedEvents = campaign.events
+      .filter((e) => ["failed", "bounced", "complained"].includes(e.eventType))
+      .map((e) => ({
+        id: e.id,
+        email: e.email,
+        eventType: e.eventType,
+        metadata: e.metadata,
+        createdAt: e.createdAt,
+      }));
+
     const { events: _, ...campaignData } = campaign;
-    return NextResponse.json({ campaign: { ...campaignData, eventCounts } });
+    return NextResponse.json({ campaign: { ...campaignData, eventCounts, failedEvents } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal server error";
     return NextResponse.json({ error: message }, { status: 500 });
