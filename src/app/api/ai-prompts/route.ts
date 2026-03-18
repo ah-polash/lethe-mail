@@ -1,14 +1,19 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
-// GET: List all saved AI prompts for the current user
-export async function GET() {
+// GET: List saved AI prompts for the current user, optionally filtered by aiMode
+export async function GET(request: NextRequest) {
   try {
     const session = await requireAuth();
 
+    const aiMode = request.nextUrl.searchParams.get("aiMode");
+
     const prompts = await prisma.aiPrompt.findMany({
-      where: { createdBy: session.id },
+      where: {
+        createdBy: session.id,
+        ...(aiMode && { aiMode }),
+      },
       orderBy: { createdAt: "desc" },
       take: 50,
     });

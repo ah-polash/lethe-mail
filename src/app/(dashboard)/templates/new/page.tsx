@@ -33,6 +33,8 @@ interface SavedPrompt {
   style: string;
   name: string | null;
   subject: string | null;
+  referenceImageUrl: string | null;
+  aiMode: string;
   createdAt: string;
 }
 
@@ -74,7 +76,8 @@ function NewTemplateContent() {
   const fetchSavedPrompts = async () => {
     setPromptsLoading(true);
     try {
-      const res = await fetch("/api/ai-prompts");
+      const mode = aiMode || "true";
+      const res = await fetch(`/api/ai-prompts?aiMode=${encodeURIComponent(mode)}`);
       if (res.ok) {
         const data = await res.json();
         setSavedPrompts(data.prompts || []);
@@ -180,6 +183,7 @@ Requirements:
           style: "professional",
           templateName: `${productName} v${versionNumber} Update`,
           templateSubject: `${productName} v${versionNumber} — New Features`,
+          aiMode: "product-update",
         }),
       });
 
@@ -240,10 +244,39 @@ Requirements:
   };
 
   const applyPrompt = (p: SavedPrompt) => {
-    setAiPrompt(p.prompt);
-    setAiStyle(p.style || "professional");
-    if (p.name) setName(p.name);
-    if (p.subject) setSubject(p.subject);
+    if (isProductUpdateMode) {
+      // Parse product update details from the saved prompt
+      const productMatch = p.prompt.match(/for "([^"]+)" version ([^\s.]+(?:\.\S*)?)/);
+      if (productMatch) {
+        setProductName(productMatch[1]);
+        setVersionNumber(productMatch[2]);
+      }
+      const landingMatch = p.prompt.match(/Product landing page:\s*(\S+)/);
+      if (landingMatch) setLandingPageUrl(landingMatch[1]);
+      const pricingMatch = p.prompt.match(/Pricing page:\s*(\S+)/);
+      if (pricingMatch) setPricingPageUrl(pricingMatch[1]);
+
+      // Extract features
+      const featureMatches = [...p.prompt.matchAll(/Feature \d+:\s*"([^"]+)"\s*\(screenshot:\s*(\S+)\)/g)];
+      if (featureMatches.length > 0) {
+        setFeatures(featureMatches.map((m) => ({
+          id: crypto.randomUUID(),
+          caption: m[1],
+          imageUrl: m[2],
+          uploading: false,
+        })));
+      }
+
+      // Extract additional instructions
+      const instructionMatch = p.prompt.match(/Additional instructions:\s*([\s\S]+?)(?:\n\nRequirements:|$)/);
+      if (instructionMatch) setProductInstruction(instructionMatch[1].trim());
+    } else {
+      setAiPrompt(p.prompt);
+      setAiStyle(p.style || "professional");
+      if (p.name) setName(p.name);
+      if (p.subject) setSubject(p.subject);
+      if (p.referenceImageUrl && isScreenshotMode) setReferenceImageUrl(p.referenceImageUrl);
+    }
     setPromptsOpen(false);
     toast.success("Prompt loaded! Click Generate to create the template.");
   };
@@ -281,6 +314,7 @@ Requirements:
           style: aiStyle,
           templateName: name,
           templateSubject: subject,
+          aiMode: aiMode || "true",
           ...(referenceImageUrl && { referenceImageUrl }),
         }),
       });
@@ -357,7 +391,7 @@ Requirements:
           </h1>
         </div>
         <div className="flex items-center gap-2">
-          {showAI && (
+          {(showAI || isProductUpdateMode) && (
             <Popover open={promptsOpen} onOpenChange={(open) => {
               setPromptsOpen(open);
               if (open && savedPrompts.length === 0) fetchSavedPrompts();

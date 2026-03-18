@@ -151,6 +151,7 @@ model AiPrompt {
   name              String?  // template name used
   subject           String?  // subject used
   referenceImageUrl String?  // screenshot reference image URL
+  aiMode            String   @default("true") // "true" | "screenshot" | "product-update"
   createdBy         String
   creator           User     @relation(fields: [createdBy], references: [id])
   createdAt         DateTime @default(now())

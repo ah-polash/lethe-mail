@@ -214,7 +214,7 @@ export async function POST(request: NextRequest) {
   try {
     const session = await requireAuth();
 
-    const { prompt, style, templateName, templateSubject, referenceImageUrl } = await request.json();
+    const { prompt, style, templateName, templateSubject, referenceImageUrl, aiMode } = await request.json();
 
     if (!prompt) {
       return NextResponse.json(
@@ -283,6 +283,7 @@ export async function POST(request: NextRequest) {
                 name: templateName || null,
                 subject: parsed.subject || templateSubject || null,
                 referenceImageUrl: referenceImageUrl || null,
+                aiMode: aiMode || "true",
                 createdBy: session.id,
               },
             }).catch(() => {}); // Don't fail generation if prompt save fails
