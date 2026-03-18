@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Sparkles, Loader2, Code, Blocks, Eye, EyeOff, History, Upload, X, ImageIcon } from "lucide-react";
+import { ArrowLeft, Sparkles, Loader2, Code, Blocks, Eye, EyeOff, History, Upload, X, ImageIcon, Plus, Trash2, Package } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -36,12 +36,20 @@ interface SavedPrompt {
   createdAt: string;
 }
 
+interface FeatureItem {
+  id: string;
+  imageUrl: string;
+  caption: string;
+  uploading: boolean;
+}
+
 function NewTemplateContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const aiMode = searchParams.get("ai"); // "true" | "screenshot" | null
+  const aiMode = searchParams.get("ai"); // "true" | "screenshot" | "product-update" | null
   const showAI = aiMode === "true" || aiMode === "screenshot";
   const isScreenshotMode = aiMode === "screenshot";
+  const isProductUpdateMode = aiMode === "product-update";
 
   const [name, setName] = useState("");
   const [subject, setSubject] = useState("");
@@ -79,6 +87,121 @@ function NewTemplateContent() {
   const [referenceImageUrl, setReferenceImageUrl] = useState("");
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Product Update mode
+  const [productName, setProductName] = useState("");
+  const [landingPageUrl, setLandingPageUrl] = useState("");
+  const [pricingPageUrl, setPricingPageUrl] = useState("");
+  const [versionNumber, setVersionNumber] = useState("");
+  const [features, setFeatures] = useState<FeatureItem[]>([
+    { id: crypto.randomUUID(), imageUrl: "", caption: "", uploading: false },
+  ]);
+  const [productInstruction, setProductInstruction] = useState("");
+
+  const addFeature = () => {
+    setFeatures((prev) => [...prev, { id: crypto.randomUUID(), imageUrl: "", caption: "", uploading: false }]);
+  };
+
+  const removeFeature = (id: string) => {
+    setFeatures((prev) => prev.filter((f) => f.id !== id));
+  };
+
+  const updateFeatureCaption = (id: string, caption: string) => {
+    setFeatures((prev) => prev.map((f) => f.id === id ? { ...f, caption } : f));
+  };
+
+  const handleFeatureImageUpload = async (id: string, file: File) => {
+    if (!file.type.startsWith("image/")) { toast.error("Only image files are allowed"); return; }
+    if (file.size > 10 * 1024 * 1024) { toast.error("Image must be under 10MB"); return; }
+
+    setFeatures((prev) => prev.map((f) => f.id === id ? { ...f, uploading: true } : f));
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      if (res.ok) {
+        const data = await res.json();
+        setFeatures((prev) => prev.map((f) => f.id === id ? { ...f, imageUrl: data.url, uploading: false } : f));
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Upload failed");
+        setFeatures((prev) => prev.map((f) => f.id === id ? { ...f, uploading: false } : f));
+      }
+    } catch {
+      toast.error("Upload failed");
+      setFeatures((prev) => prev.map((f) => f.id === id ? { ...f, uploading: false } : f));
+    }
+  };
+
+  const handleGenerateProductUpdate = async () => {
+    if (!productName) { toast.error("Product name is required"); return; }
+    if (!landingPageUrl) { toast.error("Landing page URL is required"); return; }
+    if (!pricingPageUrl) { toast.error("Pricing page URL is required"); return; }
+    if (!versionNumber) { toast.error("Version number is required"); return; }
+
+    const validFeatures = features.filter((f) => f.imageUrl && f.caption);
+    if (validFeatures.length === 0) {
+      toast.error("At least one feature with image and caption is required");
+      return;
+    }
+
+    setGenerating(true);
+    try {
+      const featuresDescription = validFeatures
+        .map((f, i) => `Feature ${i + 1}: "${f.caption}" (screenshot: ${f.imageUrl})`)
+        .join("\n");
+
+      const prompt = `Generate a product feature update email for "${productName}" version ${versionNumber}.
+
+Product landing page: ${landingPageUrl}
+Pricing page: ${pricingPageUrl}
+
+Features to highlight (each has a screenshot that MUST be included as an <img> tag in the email):
+${featuresDescription}
+
+${productInstruction ? `Additional instructions: ${productInstruction}` : ""}
+
+Requirements:
+- The email should have a professional header with the product name and version number
+- Each feature MUST be displayed as a section with:
+  1. The screenshot image (<img src="..." width="100%" style="max-width:560px;border:1px solid #e5e7eb;border-radius:8px;" />)
+  2. A compelling feature title derived from the caption
+  3. A brief description explaining the feature benefit (2-3 sentences)
+- Include a CTA button linking to ${landingPageUrl} (e.g. "Explore ${productName} ${versionNumber}")
+- Include a secondary link to the pricing page ${pricingPageUrl}
+- Use inline styles for email compatibility
+- Make it responsive and modern looking`;
+
+      const res = await fetch("/api/templates/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          style: "professional",
+          templateName: `${productName} v${versionNumber} Update`,
+          templateSubject: `${productName} v${versionNumber} — New Features`,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setHtmlContent(data.html || "");
+        setJsonContent("");
+        setEditorBlocks([]);
+        setIsHtmlMode(true);
+        if (data.subject) setSubject(data.subject);
+        setName(`${productName} v${versionNumber} Update`);
+        toast.success("Product update email generated!");
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Failed to generate");
+      }
+    } catch {
+      toast.error("Failed to generate");
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   const handleImageUpload = async (file: File) => {
     if (!file.type.startsWith("image/")) {
@@ -230,7 +353,7 @@ function NewTemplateContent() {
             <ArrowLeft className="h-4 w-4" />
           </Link>
           <h1 className="text-xl font-semibold">
-            {isScreenshotMode ? "Screenshot to AI Email" : "New Template"}
+            {isProductUpdateMode ? "Product Feature Update" : isScreenshotMode ? "Screenshot to AI Email" : "New Template"}
           </h1>
         </div>
         <div className="flex items-center gap-2">
@@ -311,21 +434,192 @@ function NewTemplateContent() {
       {/* ── Scrollable content ─────────────────────────── */}
       <div className="flex-1 min-h-0 overflow-auto">
         <div className="px-6 lg:px-8 py-4 space-y-4">
-          {/* Template Details – slim inline row */}
-          <div className="flex items-center gap-3">
-            <Input
-              placeholder="Template name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="h-9 max-w-[280px]"
-            />
-            <Input
-              placeholder="Default subject line"
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              className="h-9 max-w-[320px]"
-            />
-          </div>
+          {/* Template Details – slim inline row (hidden in product update mode until generated) */}
+          {!isProductUpdateMode && (
+            <div className="flex items-center gap-3">
+              <Input
+                placeholder="Template name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="h-9 max-w-[280px]"
+              />
+              <Input
+                placeholder="Default subject line"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                className="h-9 max-w-[320px]"
+              />
+            </div>
+          )}
+
+          {/* Product Update Mode */}
+          {isProductUpdateMode && (
+            <>
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Package className="h-4 w-4" />
+                  Product Feature Update Generator
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Product Name <span className="text-destructive">*</span></Label>
+                    <Input
+                      placeholder="e.g. Acme App"
+                      value={productName}
+                      onChange={(e) => setProductName(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>New Version Number <span className="text-destructive">*</span></Label>
+                    <Input
+                      placeholder="e.g. 2.5.0"
+                      value={versionNumber}
+                      onChange={(e) => setVersionNumber(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Product Landing Page URL <span className="text-destructive">*</span></Label>
+                    <Input
+                      placeholder="https://example.com"
+                      value={landingPageUrl}
+                      onChange={(e) => setLandingPageUrl(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Product Pricing Page URL <span className="text-destructive">*</span></Label>
+                    <Input
+                      placeholder="https://example.com/pricing"
+                      value={pricingPageUrl}
+                      onChange={(e) => setPricingPageUrl(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <Separator />
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label>Features <span className="text-destructive">*</span></Label>
+                    <Button type="button" variant="outline" size="sm" onClick={addFeature} className="h-7 text-xs">
+                      <Plus className="h-3 w-3 mr-1" />
+                      Add Feature
+                    </Button>
+                  </div>
+
+                  {features.map((feature, index) => (
+                    <div key={feature.id} className="border p-3 space-y-2 bg-muted/30">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-muted-foreground">Feature {index + 1}</span>
+                        {features.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() => removeFeature(feature.id)}
+                          >
+                            <Trash2 className="h-3 w-3 text-destructive" />
+                          </Button>
+                        )}
+                      </div>
+
+                      {/* Feature image upload */}
+                      {feature.imageUrl ? (
+                        <div className="relative inline-block">
+                          <img
+                            src={feature.imageUrl}
+                            alt={`Feature ${index + 1}`}
+                            className="max-h-[140px] border object-contain bg-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setFeatures((prev) => prev.map((f) => f.id === feature.id ? { ...f, imageUrl: "" } : f))}
+                            className="absolute -top-2 -right-2 h-5 w-5 flex items-center justify-center bg-destructive text-white text-xs hover:bg-destructive/90 transition-colors"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="border-2 border-dashed p-4 flex flex-col items-center gap-1.5 cursor-pointer hover:border-primary/50 hover:bg-accent/50 transition-colors">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleFeatureImageUpload(feature.id, file);
+                              e.target.value = "";
+                            }}
+                          />
+                          {feature.uploading ? (
+                            <>
+                              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                              <span className="text-xs text-muted-foreground">Uploading...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Upload className="h-5 w-5 text-muted-foreground" />
+                              <span className="text-xs text-muted-foreground">Click to upload screenshot</span>
+                            </>
+                          )}
+                        </label>
+                      )}
+
+                      {/* Feature caption */}
+                      <Input
+                        placeholder="Feature caption — e.g. New dashboard with real-time analytics"
+                        value={feature.caption}
+                        onChange={(e) => updateFeatureCaption(feature.id, e.target.value)}
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                <Separator />
+
+                <div className="space-y-1.5">
+                  <Label>Additional Instructions (optional)</Label>
+                  <Textarea
+                    placeholder="Any extra instructions for the AI, e.g. tone, colors, branding guidelines..."
+                    value={productInstruction}
+                    onChange={(e) => setProductInstruction(e.target.value)}
+                    rows={2}
+                  />
+                </div>
+
+                <Button
+                  onClick={handleGenerateProductUpdate}
+                  disabled={generating}
+                  className="w-full"
+                >
+                  {generating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                  {generating ? "Generating..." : "Generate product update email"}
+                </Button>
+              </div>
+
+              {/* Show auto-filled name/subject after generation */}
+              {(name || subject) && (
+                <>
+                  <Separator />
+                  <div className="flex items-center gap-3">
+                    <Input
+                      placeholder="Template name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="h-9 max-w-[280px]"
+                    />
+                    <Input
+                      placeholder="Default subject line"
+                      value={subject}
+                      onChange={(e) => setSubject(e.target.value)}
+                      className="h-9 max-w-[320px]"
+                    />
+                  </div>
+                </>
+              )}
+            </>
+          )}
 
           {/* AI Generation */}
           {showAI && (
