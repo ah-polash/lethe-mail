@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Sparkles, Image, Package, Trash2, FileText, LayoutGrid, Columns2, Columns3 } from "lucide-react";
+import { Plus, Sparkles, Package, Trash2, FileText, LayoutGrid, Columns2, Columns3 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -114,11 +114,7 @@ export default function TemplatesPage() {
               <Package className="mr-2 h-4 w-4" />
               Product Feature Update
           </Link>
-          <Link href="/templates/new?ai=screenshot" className={cn(buttonVariants({ variant: "outline" }))}>
-              <Image className="mr-2 h-4 w-4" />
-              Screenshot to AI Email
-          </Link>
-          <Link href="/templates/new?ai=true" className={cn(buttonVariants({ variant: "outline" }))}>
+<Link href="/templates/new?ai=true" className={cn(buttonVariants({ variant: "outline" }))}>
               <Sparkles className="mr-2 h-4 w-4" />
               Generate with AI
           </Link>
