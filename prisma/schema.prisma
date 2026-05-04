@@ -133,6 +133,27 @@ model SwipeOneTagAudit {
   updatedAt   DateTime @updatedAt
 }
 
+// Dev/test only — captures every inbound webhook POST (currently SES via SNS)
+// raw, plus the resolved metadata our handler extracted. Used by the campaign
+// log viewer so we can verify SNS data is being received correctly.
+model WebhookLog {
+  id          String   @id @default(uuid())
+  source      String   @default("ses-sns")
+  type        String?  // SNS Type — SubscriptionConfirmation | Notification | Unhandled
+  eventType   String?  // Bounce | Complaint | Delivery | Open | Click | Reject | ...
+  messageId   String?
+  email       String?
+  campaignId  String?  // resolved campaign id if we matched one
+  status      String   @default("received") // received | confirmed | processed | unmatched | error | unhandled
+  result      String?  // human-readable processing outcome
+  raw         String   // raw request body as JSON string
+  createdAt   DateTime @default(now())
+
+  @@index([campaignId])
+  @@index([messageId])
+  @@index([eventType])
+}
+
 model PopularVariable {
   id        String   @id @default(uuid())
   name      String   @unique

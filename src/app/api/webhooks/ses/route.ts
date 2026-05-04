@@ -7,25 +7,86 @@ import {
 } from "@/lib/swipeone";
 
 export async function POST(request: NextRequest) {
+  // Capture the raw request body before anything else so we can log it
+  // regardless of whether parsing/processing succeeds.
+  const rawText = await request.text();
+  let body: Record<string, unknown> = {};
   try {
-    const body = await request.json();
+    body = rawText ? JSON.parse(rawText) : {};
+  } catch {
+    // Persist a log row even for malformed JSON, then bail.
+    try {
+      await prisma.webhookLog.create({
+        data: {
+          source: "ses-sns",
+          status: "error",
+          result: "Invalid JSON body",
+          raw: rawText.slice(0, 20000),
+        },
+      });
+    } catch { /* best-effort */ }
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
+  // Stub a log row — we'll patch it with the resolved details below.
+  let logId: string | null = null;
+  try {
+    const stub = await prisma.webhookLog.create({
+      data: {
+        source: "ses-sns",
+        type: typeof body.Type === "string" ? (body.Type as string) : null,
+        status: "received",
+        raw: rawText.slice(0, 20000),
+      },
+    });
+    logId = stub.id;
+  } catch { /* best-effort */ }
+
+  async function patchLog(fields: Partial<{
+    type: string | null;
+    eventType: string | null;
+    messageId: string | null;
+    email: string | null;
+    campaignId: string | null;
+    status: string;
+    result: string | null;
+  }>) {
+    if (!logId) return;
+    try {
+      await prisma.webhookLog.update({ where: { id: logId }, data: fields });
+    } catch { /* best-effort */ }
+  }
+
+  try {
     // Handle SNS subscription confirmation
-    if (body.Type === "SubscriptionConfirmation" && body.SubscribeURL) {
+    if (body.Type === "SubscriptionConfirmation" && typeof body.SubscribeURL === "string") {
       await fetch(body.SubscribeURL);
+      await patchLog({ status: "confirmed", result: "SNS subscription confirmed" });
       return NextResponse.json({ success: true, message: "Subscription confirmed" });
     }
 
-    // Handle SNS notification
-    let message = body;
-    if (body.Type === "Notification" && body.Message) {
-      message = JSON.parse(body.Message);
+    // Handle SNS notification — parsed payload uses dynamic SES schemas, so we
+    // intentionally type it loosely.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let message: any = body;
+    if (body.Type === "Notification" && typeof body.Message === "string") {
+      try {
+        message = JSON.parse(body.Message);
+      } catch {
+        await patchLog({ status: "error", result: "Notification.Message was not valid JSON" });
+        return NextResponse.json({ error: "Bad SNS notification body" }, { status: 400 });
+      }
     }
 
-    const eventType = message.eventType || message.notificationType;
+    const eventType: string | null =
+      (typeof message?.eventType === "string" && message.eventType) ||
+      (typeof message?.notificationType === "string" && message.notificationType) ||
+      null;
     if (!eventType) {
+      await patchLog({ status: "unhandled", result: "No event type in payload" });
       return NextResponse.json({ success: true, message: "No event type found" });
     }
+    await patchLog({ eventType });
 
     // Extract details based on event type
     let email = "";
@@ -89,10 +150,14 @@ export async function POST(request: NextRequest) {
         break;
       }
       default:
+        await patchLog({ status: "unhandled", result: `Unhandled event type: ${eventType}` });
         return NextResponse.json({ success: true, message: `Unhandled event type: ${eventType}` });
     }
 
+    await patchLog({ messageId: messageId || null, email: email || null });
+
     if (!messageId) {
+      await patchLog({ status: "error", result: "No messageId in payload" });
       return NextResponse.json({ success: true, message: "No messageId found" });
     }
 
@@ -105,10 +170,15 @@ export async function POST(request: NextRequest) {
     });
 
     if (!sentEvent) {
+      await patchLog({
+        status: "unmatched",
+        result: `No matching campaign for messageId ${messageId}`,
+      });
       return NextResponse.json({ success: true, message: "No matching campaign found" });
     }
 
     const campaignId = sentEvent.campaignId;
+    await patchLog({ campaignId });
 
     // Map SES event types to our event types
     const eventTypeMap: Record<string, string> = {
@@ -202,9 +272,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    await patchLog({
+      status: "processed",
+      result: `Recorded ${eventTypeMap[eventType] || eventType} for ${email || "(unknown)"}`,
+    });
+
     return NextResponse.json({ success: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Internal server error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const errMsg = error instanceof Error ? error.message : "Internal server error";
+    await patchLog({ status: "error", result: errMsg.slice(0, 1000) });
+    return NextResponse.json({ error: errMsg }, { status: 500 });
   }
 }
