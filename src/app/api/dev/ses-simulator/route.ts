@@ -1,6 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { sendEmail } from "@/lib/ses";
+import { prisma } from "@/lib/db";
+
+const SIMULATOR_CAMPAIGN_NAME = "[SES Simulator] System Test Campaign";
+
+// Get-or-create a synthetic campaign that holds the "sent" events fired from
+// the simulator panel. The webhook needs a matching "sent" CampaignEvent to
+// correlate inbound bounce/complaint events to a campaign — without it the
+// inbound event is silently dropped.
+async function ensureSimulatorCampaign(createdBy: string): Promise<string> {
+  const existing = await prisma.campaign.findFirst({
+    where: { name: SIMULATOR_CAMPAIGN_NAME },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+  const created = await prisma.campaign.create({
+    data: {
+      name: SIMULATOR_CAMPAIGN_NAME,
+      subject: "(SES simulator)",
+      htmlContent: "<p>Simulator test</p>",
+      audienceSource: "internal",
+      status: "sent",
+      createdBy,
+    },
+    select: { id: true },
+  });
+  return created.id;
+}
 
 const SIMULATOR_TARGETS = {
   success: "success@simulator.amazonses.com",
@@ -27,7 +54,7 @@ const SIMULATOR_LABEL: Record<SimulatorKey, string> = {
 // simulator addresses, so this works even without production-access SES.
 export async function POST(request: NextRequest) {
   try {
-    await requireSuperAdmin();
+    const session = await requireSuperAdmin();
 
     const body = await request.json();
     const simulator = body.simulator as SimulatorKey | undefined;
@@ -55,16 +82,40 @@ export async function POST(request: NextRequest) {
 <p>Sent at: ${new Date().toISOString()}</p>
 </body></html>`;
 
+    const campaignId = await ensureSimulatorCampaign(session.id);
+
     const result = await sendEmail({
       to: [target],
       subject,
       htmlBody,
       fromEmail,
       fromName,
+      campaignId,
     });
 
     if (result.error) {
       return NextResponse.json({ error: result.error }, { status: 502 });
+    }
+
+    // Record a "sent" event so the SES webhook can correlate the resulting
+    // bounce/complaint to this campaign — exactly what real campaign sends do.
+    if (result.messageId) {
+      try {
+        await prisma.campaignEvent.create({
+          data: {
+            campaignId,
+            email: target,
+            eventType: "sent",
+            metadata: JSON.stringify({
+              messageId: result.messageId,
+              source: "simulator",
+              simulator,
+            }),
+          },
+        });
+      } catch (err) {
+        console.warn("[ses-simulator] failed to record sent event:", err);
+      }
     }
 
     return NextResponse.json({
@@ -73,6 +124,7 @@ export async function POST(request: NextRequest) {
       target,
       label,
       messageId: result.messageId,
+      campaignId,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal server error";
