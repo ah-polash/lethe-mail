@@ -98,9 +98,13 @@ export default function CampaignsPage() {
   const [logHooks, setLogHooks] = useState<WebhookLog[]>([]);
   const [logLoading, setLogLoading] = useState(false);
   const [logTab, setLogTab] = useState<"events" | "hooks">("events");
+  const [eventsError, setEventsError] = useState<string | null>(null);
+  const [hooksError, setHooksError] = useState<string | null>(null);
 
   const loadLog = async (campaign: Campaign) => {
     setLogLoading(true);
+    setEventsError(null);
+    setHooksError(null);
     try {
       const [evRes, hookRes] = await Promise.all([
         fetch(`/api/campaign-events?campaignId=${encodeURIComponent(campaign.id)}`),
@@ -110,15 +114,22 @@ export default function CampaignsPage() {
         const json = await evRes.json();
         setLogEvents(json.events || []);
       } else {
+        const data = await evRes.json().catch(() => ({}));
+        setEventsError(`HTTP ${evRes.status} — ${data.error || evRes.statusText}`);
         setLogEvents([]);
       }
       if (hookRes.ok) {
         const json = await hookRes.json();
         setLogHooks(json.logs || []);
       } else {
+        const data = await hookRes.json().catch(() => ({}));
+        setHooksError(`HTTP ${hookRes.status} — ${data.error || hookRes.statusText}`);
         setLogHooks([]);
       }
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      setEventsError(msg);
+      setHooksError(msg);
       toast.error("Failed to load campaign log");
     } finally {
       setLogLoading(false);
@@ -367,9 +378,23 @@ export default function CampaignsPage() {
               Loading log...
             </div>
           ) : logTab === "events" ? (
-            logEvents.length === 0 ? (
+            eventsError ? (
+              <div className="py-8 text-center text-sm">
+                <p className="text-destructive font-medium">Failed to load events</p>
+                <p className="text-muted-foreground text-xs mt-1 font-mono">{eventsError}</p>
+                <p className="text-muted-foreground text-xs mt-3">
+                  401/403 → not logged in as super_admin. 500 / &quot;Unknown argument
+                  webhookLog&quot; → run <code className="font-mono">npx prisma generate</code>{" "}
+                  and restart the server. 500 with a relation/table error → run{" "}
+                  <code className="font-mono">npx prisma db push</code> on the production DB.
+                </p>
+              </div>
+            ) : logEvents.length === 0 ? (
               <p className="py-12 text-center text-muted-foreground text-sm">
-                No events recorded for this campaign.
+                No events recorded for this campaign. If the campaign was sent, you should
+                see one <code className="font-mono">sent</code> event per recipient — empty
+                here means the send loop never wrote them. Check the server logs for the
+                send route.
               </p>
             ) : (
               <div className="border max-h-[60vh] overflow-auto bg-muted/20">
@@ -422,7 +447,19 @@ export default function CampaignsPage() {
               </div>
             )
           ) : (
-            logHooks.length === 0 ? (
+            hooksError ? (
+              <div className="py-8 text-center text-sm">
+                <p className="text-destructive font-medium">Failed to load webhook logs</p>
+                <p className="text-muted-foreground text-xs mt-1 font-mono">{hooksError}</p>
+                <p className="text-muted-foreground text-xs mt-3">
+                  Most common cause: the <code className="font-mono">WebhookLog</code>{" "}
+                  table doesn&apos;t exist on production yet. Run{" "}
+                  <code className="font-mono">npx prisma db push</code> against the prod DB,
+                  then <code className="font-mono">npx prisma generate</code>, then restart
+                  the Next.js server. (Also: HTTP 401/403 → not logged in as super_admin.)
+                </p>
+              </div>
+            ) : logHooks.length === 0 ? (
               <p className="py-12 text-center text-muted-foreground text-sm">
                 No SNS webhook payloads logged yet. If you sent the campaign and expected
                 bounce/complaint events, AWS isn&apos;t reaching{" "}
