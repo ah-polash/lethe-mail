@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { markContactAsUnsubscribed } from "@/lib/swipeone";
+import {
+  markContactAsUnsubscribed,
+  markContactAsComplained,
+  markContactAsBounced,
+} from "@/lib/swipeone";
 
 export async function POST(request: NextRequest) {
   try {
@@ -153,14 +157,18 @@ export async function POST(request: NextRequest) {
     });
     const source = campaignRecord?.audienceSource || "internal";
 
-    // Helper to update internal contact with tag + flags
-    async function suppressInternalContact(contactEmail: string, setConsent: boolean) {
+    // Helper to update an internal contact: set suppression flags + add tags.
+    async function suppressInternalContact(
+      contactEmail: string,
+      setConsent: boolean,
+      extraTags: string[] = []
+    ) {
       const contact = await prisma.contact.findUnique({ where: { email: contactEmail } });
       if (contact) {
         let tags: string[] = [];
         try { tags = JSON.parse(contact.tags || "[]"); } catch { /* ignore */ }
-        if (!tags.includes("user.marketing.opted_out")) {
-          tags.push("user.marketing.opted_out");
+        for (const t of [...extraTags, "user.marketing.opted_out"]) {
+          if (!tags.includes(t)) tags.push(t);
         }
         await prisma.contact.update({
           where: { email: contactEmail },
@@ -178,19 +186,19 @@ export async function POST(request: NextRequest) {
       const bounceType = (metadata as Record<string, unknown>).bounceType;
       if (bounceType === "Permanent") {
         if (source === "swipeone") {
-          try { await markContactAsUnsubscribed(email); } catch { /* best-effort */ }
+          try { await markContactAsBounced(email); } catch { /* best-effort */ }
         } else {
-          await suppressInternalContact(email, false);
+          await suppressInternalContact(email, false, ["bounced"]);
         }
       }
     }
 
-    // For complaints, mark contact as unsubscribed in the correct system
+    // For complaints, tag and suppress the contact in the correct system
     if (eventType === "Complaint" && email) {
       if (source === "swipeone") {
-        try { await markContactAsUnsubscribed(email); } catch { /* best-effort */ }
+        try { await markContactAsComplained(email); } catch { /* best-effort */ }
       } else {
-        await suppressInternalContact(email, true);
+        await suppressInternalContact(email, true, ["complained"]);
       }
     }
 

@@ -2,6 +2,53 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
+// Best-effort extraction of { html, subject } from an LLM response that may not be strict JSON.
+// Returns html (and optional subject) on success, null if nothing usable was found.
+function extractHtmlAndSubject(raw: string): { html: string; subject?: string } | null {
+  if (!raw) return null;
+  // Strip markdown fences (```json or ```html) plus surrounding whitespace.
+  const cleaned = raw
+    .replace(/^\s*```(?:json|html)?\s*\n?/i, "")
+    .replace(/\n?```\s*$/i, "")
+    .trim();
+
+  // 1) Direct JSON parse.
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (parsed && typeof parsed === "object") {
+      const html = typeof parsed.html === "string" ? parsed.html : null;
+      const subject = typeof parsed.subject === "string" ? parsed.subject : undefined;
+      if (html) return { html, subject };
+    }
+  } catch {
+    // Try other strategies
+  }
+
+  // 2) Locate the first {...} block in the text and parse it.
+  const firstBrace = cleaned.indexOf("{");
+  const lastBrace = cleaned.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    const candidate = cleaned.slice(firstBrace, lastBrace + 1);
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object") {
+        const html = typeof parsed.html === "string" ? parsed.html : null;
+        const subject = typeof parsed.subject === "string" ? parsed.subject : undefined;
+        if (html) return { html, subject };
+      }
+    } catch {
+      // Try plain HTML fallback
+    }
+  }
+
+  // 3) Plain HTML response (no JSON wrapper) — accept if it looks like HTML.
+  if (/<\s*(html|body|table|div|h\d|p|a|img)\b/i.test(cleaned)) {
+    return { html: cleaned };
+  }
+
+  return null;
+}
+
 function getDefaultTemplate(prompt: string, style: string): { html: string; subject: string } {
   const baseStyles = `
     body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f7; }
@@ -208,6 +255,25 @@ function getDefaultTemplate(prompt: string, style: string): { html: string; subj
 </html>`,
       };
   }
+
+  // Generic default for unknown styles
+  return {
+    subject: prompt.slice(0, 80),
+    html: `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;font-family:Segoe UI,Tahoma,Geneva,Verdana,sans-serif;background:#f4f4f7;">
+<div style="max-width:600px;margin:0 auto;background:#fff;padding:32px;">
+  <h1 style="margin:0 0 16px;font-size:24px;line-height:1.3;color:#222;">${prompt.replace(/[<>&]/g, "")}</h1>
+  <p style="margin:0 0 16px;font-size:16px;line-height:1.6;color:#444;">Replace this with your content.</p>
+  <p style="text-align:center;margin-top:24px;">
+    <a href="#" style="display:inline-block;padding:12px 28px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Learn more</a>
+  </p>
+</div>
+<div style="max-width:600px;margin:0 auto;padding:16px;text-align:center;font-size:12px;color:#999;">
+  You received this email because you subscribed to our mailing list.
+</div>
+</body></html>`,
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -230,6 +296,9 @@ export async function POST(request: NextRequest) {
     const apiKey = aiConfig?.apiKey || process.env.OPENAI_API_KEY;
     const baseUrl = aiConfig?.baseUrl || "https://api.openai.com/v1";
     const model = aiConfig?.model || "gpt-4o-mini";
+
+    let generatedHtml: string | null = null;
+    let generatedSubject: string | null = null;
 
     if (apiKey) {
       try {
@@ -270,50 +339,77 @@ export async function POST(request: NextRequest) {
         if (response.ok) {
           const data = await response.json();
           const content = data.choices?.[0]?.message?.content;
-          if (content) {
-            // Strip markdown code fences if present
-            const cleaned = content.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
-            const parsed = JSON.parse(cleaned);
-
-            // Save prompt for future reuse
-            await prisma.aiPrompt.create({
-              data: {
-                prompt,
-                style: style || "professional",
-                name: templateName || null,
-                subject: parsed.subject || templateSubject || null,
-                referenceImageUrl: referenceImageUrl || null,
-                aiMode: aiMode || "true",
-                createdBy: session.id,
-              },
-            }).catch(() => {}); // Don't fail generation if prompt save fails
-
-            return NextResponse.json({
-              html: parsed.html,
-              subject: parsed.subject,
-            });
+          if (typeof content === "string" && content.trim() !== "") {
+            const extracted = extractHtmlAndSubject(content);
+            if (extracted) {
+              generatedHtml = extracted.html;
+              generatedSubject = extracted.subject ?? null;
+            } else {
+              console.warn("[ai-generate] Could not extract html/subject from LLM response");
+            }
           }
+        } else {
+          const errText = await response.text().catch(() => "");
+          console.warn("[ai-generate] LLM response not ok:", response.status, errText.slice(0, 300));
         }
-      } catch {
-        // Fall through to default template
+      } catch (err) {
+        console.warn("[ai-generate] LLM request failed:", err);
       }
     }
 
-    // Fallback to default templates
-    const result = getDefaultTemplate(prompt, style || "general");
+    // Fall back to a deterministic template if the LLM didn't produce usable content.
+    if (!generatedHtml) {
+      const result = getDefaultTemplate(prompt, style || "general");
+      generatedHtml = result.html;
+      generatedSubject = result.subject;
+    }
 
-    // Save prompt for future reuse
-    await prisma.aiPrompt.create({
-      data: {
-        prompt,
-        style: style || "professional",
-        name: templateName || null,
-        subject: result.subject || templateSubject || null,
-        createdBy: session.id,
-      },
-    }).catch(() => {});
+    // Always persist the generated result so "Use Previous Results" can replay it for free.
+    try {
+      await prisma.aiPrompt.create({
+        data: {
+          prompt,
+          style: style || "professional",
+          name: templateName || null,
+          subject: generatedSubject || templateSubject || null,
+          referenceImageUrl: referenceImageUrl || null,
+          aiMode: aiMode || "true",
+          generatedHtml,
+          generatedSubject,
+          createdBy: session.id,
+        },
+      });
+    } catch (err) {
+      console.error("[ai-generate] Failed to persist AiPrompt:", err);
+    }
 
-    return NextResponse.json(result);
+    // Also persist as a DynamicTemplate row so the result appears under
+    // "Use Previous Results" and the Dynamic Templates menu page.
+    try {
+      const fallbackName =
+        (typeof templateName === "string" && templateName.trim()) ||
+        (typeof generatedSubject === "string" && generatedSubject.trim()) ||
+        (typeof templateSubject === "string" && templateSubject.trim()) ||
+        `AI ${aiMode === "product-update" ? "Product Update" : "Email"} — ${new Date().toLocaleString()}`;
+      await prisma.dynamicTemplate.create({
+        data: {
+          name: fallbackName,
+          subject: generatedSubject || templateSubject || null,
+          htmlContent: generatedHtml,
+          source: "ai",
+          aiMode: aiMode || "true",
+          prompt: prompt || null,
+          createdBy: session.id,
+        },
+      });
+    } catch (err) {
+      console.error("[ai-generate] Failed to persist DynamicTemplate:", err);
+    }
+
+    return NextResponse.json({
+      html: generatedHtml,
+      subject: generatedSubject,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal server error";
     if (message === "Unauthorized") {

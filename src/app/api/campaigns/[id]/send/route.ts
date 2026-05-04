@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { sendBulkEmails } from "@/lib/ses";
+import { getSegmentContacts } from "@/lib/swipeone";
 
 export async function POST(
   request: NextRequest,
@@ -39,23 +40,73 @@ export async function POST(
       return NextResponse.json({ campaign: updated });
     }
 
-    // Get recipient emails from campaign
-    const recipientEmails: string[] = campaign.recipientEmails
-      ? JSON.parse(campaign.recipientEmails)
-      : [];
-
-    if (recipientEmails.length === 0) {
-      return NextResponse.json(
-        { error: "No recipients found for this campaign" },
-        { status: 400 }
-      );
-    }
-
     if (!campaign.fromEmail) {
       return NextResponse.json(
         { error: "No sender email set for this campaign" },
         { status: 400 }
       );
+    }
+
+    const contactByEmail = new Map<string, Record<string, unknown>>();
+    const suppressedEmails = new Set<string>();
+    let recipientEmails: string[] = [];
+
+    if (campaign.audienceSource === "swipeone") {
+      // Resolve recipients from SwipeOne segments at send time.
+      const segmentIds: string[] = campaign.segmentIds ? JSON.parse(campaign.segmentIds) : [];
+      if (segmentIds.length === 0) {
+        return NextResponse.json(
+          { error: "No SwipeOne segments configured for this campaign" },
+          { status: 400 }
+        );
+      }
+
+      const seenEmails = new Set<string>();
+      for (const segmentId of segmentIds) {
+        const contacts = await getSegmentContacts(segmentId);
+        for (const c of contacts as unknown as Record<string, unknown>[]) {
+          const email = typeof c.email === "string" ? c.email : "";
+          if (!email || seenEmails.has(email)) continue;
+          seenEmails.add(email);
+          contactByEmail.set(email, c);
+        }
+      }
+      recipientEmails = Array.from(seenEmails);
+
+      if (recipientEmails.length === 0) {
+        return NextResponse.json(
+          { error: "SwipeOne segments returned no contacts" },
+          { status: 400 }
+        );
+      }
+    } else {
+      // Stored recipient emails from internal/manual sources
+      recipientEmails = campaign.recipientEmails ? JSON.parse(campaign.recipientEmails) : [];
+
+      if (recipientEmails.length === 0) {
+        return NextResponse.json(
+          { error: "No recipients found for this campaign" },
+          { status: 400 }
+        );
+      }
+
+      // Look up contact data from local DB for merge tags + suppression
+      const contacts = await prisma.contact.findMany({
+        where: { email: { in: recipientEmails } },
+      });
+
+      for (const contact of contacts) {
+        const { properties, ...rest } = contact as unknown as Record<string, unknown>;
+        let parsed: Record<string, unknown> = {};
+        if (typeof properties === "string" && properties) {
+          try { parsed = JSON.parse(properties); } catch { /* ignore */ }
+        }
+        contactByEmail.set(contact.email, { ...rest, ...parsed });
+
+        if (!contact.isMarketingAllowed) {
+          suppressedEmails.add(contact.email);
+        }
+      }
     }
 
     // Set status to sending (totalRecipients updated after suppression filtering below)
@@ -65,28 +116,6 @@ export async function POST(
     });
 
     const baseUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-
-    // Look up contact data for all recipients
-    const contacts = await prisma.contact.findMany({
-      where: { email: { in: recipientEmails } },
-    });
-
-    const contactByEmail = new Map<string, Record<string, unknown>>();
-    const suppressedEmails = new Set<string>();
-
-    for (const contact of contacts) {
-      const { properties, ...rest } = contact as unknown as Record<string, unknown>;
-      let parsed: Record<string, unknown> = {};
-      if (typeof properties === "string" && properties) {
-        try { parsed = JSON.parse(properties); } catch { /* ignore */ }
-      }
-      contactByEmail.set(contact.email, { ...rest, ...parsed });
-
-      // Suppress contacts who unsubscribed or have marketing disallowed
-      if (!contact.isMarketingAllowed) {
-        suppressedEmails.add(contact.email);
-      }
-    }
 
     // Also check for any previously bounced (hard) or complained emails across all campaigns
     const suppressedEvents = await prisma.campaignEvent.findMany({

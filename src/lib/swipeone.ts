@@ -120,7 +120,9 @@ export async function createEvent(data: Record<string, unknown>) {
   return swipeOneRequest("POST", `/zapier/event`, data);
 }
 
-// Tag a contact by creating/updating contact with tags
+// Tag a contact by creating/updating contact with tags.
+// SwipeOne's /zapier/contact endpoint replaces the `tags` field on each call,
+// so all tags must be passed together in a single comma-separated string.
 export async function addTagToContact(email: string, tag: string) {
   return swipeOneRequest("POST", `/zapier/contact`, {
     email,
@@ -128,9 +130,94 @@ export async function addTagToContact(email: string, tag: string) {
   });
 }
 
-// Add marketing opted out tag
+export async function addTagsToContact(email: string, tags: string[]) {
+  const cleaned = Array.from(new Set(tags.map((t) => t.trim()).filter(Boolean)));
+  if (cleaned.length === 0) return null;
+  // SwipeOne's /zapier/contact accepts an array of tags. We try the array form
+  // first, and fall back to a comma-separated string if SwipeOne rejects it.
+  try {
+    return await swipeOneRequest("POST", `/zapier/contact`, {
+      email,
+      tags: cleaned,
+    });
+  } catch (err) {
+    console.warn("[swipeone] tags array form failed, retrying comma-separated:", err);
+    return swipeOneRequest("POST", `/zapier/contact`, {
+      email,
+      tags: cleaned.join(","),
+    });
+  }
+}
+
+// AWS SES compliance: when a recipient unsubscribes, complains, or hard-bounces,
+// we tag the contact in SwipeOne so future automations and exports can exclude
+// them, AND flip "Email Marketing Consent" → unsubscribed on the contact record.
+// The legacy "user.marketing.opted_out" tag is always included for back-compat
+// with existing SwipeOne automations.
+async function markContactSuppressed(email: string, reason: "unsubscribed" | "complained" | "bounced") {
+  const tags = [reason, "user.marketing.opted_out"];
+
+  // SwipeOne's /zapier/contact endpoint takes a comma-separated tags string.
+  // The array form returns 500, so we don't try it.
+  let tagSuccess = false;
+  try {
+    await swipeOneRequest("POST", `/zapier/contact`, {
+      email,
+      tags: tags.join(","),
+    });
+    tagSuccess = true;
+  } catch (err) {
+    console.warn("[swipeone] tag write failed for", email, err);
+  }
+
+  // Flip Email Marketing Consent in a separate, minimal request so a malformed
+  // field can't poison the tag write above.
+  try {
+    await swipeOneRequest("POST", `/zapier/contact`, {
+      email,
+      marketing_email_subscription_status: "unsubscribed",
+    });
+  } catch (err) {
+    console.warn("[swipeone] marketing consent write failed for", email, err);
+  }
+
+  // Audit only on successful tag write — union with anything we previously
+  // pushed for this contact so the suppression page reflects the full set.
+  if (tagSuccess) {
+    try {
+      const existing = await prisma.swipeOneTagAudit.findUnique({ where: { email } });
+      let merged: string[] = [...tags];
+      if (existing?.tags) {
+        try {
+          const prev = JSON.parse(existing.tags);
+          if (Array.isArray(prev)) {
+            merged = Array.from(new Set([...prev.map(String), ...tags]));
+          }
+        } catch { /* ignore */ }
+      }
+      await prisma.swipeOneTagAudit.upsert({
+        where: { email },
+        create: { email, tags: JSON.stringify(merged), lastReason: reason },
+        update: { tags: JSON.stringify(merged), lastReason: reason },
+      });
+    } catch (err) {
+      console.warn("[swipeone] failed to record tag audit for", email, err);
+    }
+  }
+
+  return { tagSuccess };
+}
+
 export async function markContactAsUnsubscribed(email: string) {
-  return addTagToContact(email, "user.marketing.opted_out");
+  return markContactSuppressed(email, "unsubscribed");
+}
+
+export async function markContactAsComplained(email: string) {
+  return markContactSuppressed(email, "complained");
+}
+
+export async function markContactAsBounced(email: string) {
+  return markContactSuppressed(email, "bounced");
 }
 
 // Send event for a contact

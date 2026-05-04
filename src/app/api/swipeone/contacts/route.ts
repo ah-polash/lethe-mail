@@ -8,6 +8,7 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const segmentId = searchParams.get("segmentId");
+    const full = searchParams.get("full") === "1";
 
     if (!segmentId) {
       return NextResponse.json(
@@ -17,6 +18,13 @@ export async function GET(request: NextRequest) {
     }
 
     const contacts = await getSegmentContacts(segmentId);
+
+    if (full) {
+      return NextResponse.json({
+        contacts: contacts as unknown as Record<string, unknown>[],
+        count: contacts.length,
+      });
+    }
 
     return NextResponse.json({
       contacts: contacts.map((c) => ({

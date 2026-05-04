@@ -96,6 +96,20 @@ const CONTACT_PROPERTIES: { label: string; name: string }[] = [
   { label: "Last Updated Date", name: "updatedAt" },
 ];
 
+export type DynamicField = { label: string; name: string };
+
+// Merge two property lists, preferring entries from `extra` and de-duping by name
+function mergeProperties(
+  base: DynamicField[],
+  extra?: DynamicField[]
+): DynamicField[] {
+  if (!extra || extra.length === 0) return base;
+  const byName = new Map<string, DynamicField>();
+  for (const p of base) byName.set(p.name, p);
+  for (const p of extra) byName.set(p.name, p);
+  return Array.from(byName.values());
+}
+
 // ---- Slash Command Textarea ----
 function SlashCommandTextarea({
   value,
@@ -104,6 +118,7 @@ function SlashCommandTextarea({
   placeholder,
   rows,
   singleLine,
+  dynamicFields,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -111,6 +126,7 @@ function SlashCommandTextarea({
   placeholder?: string;
   rows?: number;
   singleLine?: boolean;
+  dynamicFields?: DynamicField[];
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const [filter, setFilter] = useState("");
@@ -119,7 +135,8 @@ function SlashCommandTextarea({
   const ref = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const filtered = CONTACT_PROPERTIES.filter(
+  const properties = mergeProperties(CONTACT_PROPERTIES, dynamicFields);
+  const filtered = properties.filter(
     (p) =>
       p.label.toLowerCase().includes(filter.toLowerCase()) ||
       p.name.toLowerCase().includes(filter.toLowerCase())
@@ -615,10 +632,12 @@ function PropertiesPanel({
   block,
   onChange,
   onDelete,
+  dynamicFields,
 }: {
   block: EmailBlock;
   onChange: (props: Record<string, string | number | EmailBlock[][]>) => void;
   onDelete: () => void;
+  dynamicFields?: DynamicField[];
 }) {
   const p = block.props;
 
@@ -637,6 +656,7 @@ function PropertiesPanel({
               <SlashCommandTextarea
                 value={p.content as string}
                 onChange={(v) => updateProp("content", v)}
+                dynamicFields={dynamicFields}
               />
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -779,6 +799,7 @@ function PropertiesPanel({
                 value={p.content as string}
                 onChange={(v) => updateProp("content", v)}
                 singleLine
+                dynamicFields={dynamicFields}
               />
             </div>
             <div className="space-y-1">
@@ -956,9 +977,10 @@ function PropertiesPanel({
 interface EmailEditorProps {
   initialBlocks?: EmailBlock[];
   onChange?: (data: { html: string; json: string }) => void;
+  dynamicFields?: DynamicField[];
 }
 
-export function EmailEditor({ initialBlocks, onChange }: EmailEditorProps) {
+export function EmailEditor({ initialBlocks, onChange, dynamicFields }: EmailEditorProps) {
   const [blocks, setBlocks] = useState<EmailBlock[]>(initialBlocks || []);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
 
@@ -1141,6 +1163,7 @@ export function EmailEditor({ initialBlocks, onChange }: EmailEditorProps) {
               block={selectedBlock}
               onChange={(props) => updateBlockProps(selectedBlock.id, props)}
               onDelete={() => deleteBlock(selectedBlock.id)}
+              dynamicFields={dynamicFields}
             />
           </ScrollArea>
         ) : (

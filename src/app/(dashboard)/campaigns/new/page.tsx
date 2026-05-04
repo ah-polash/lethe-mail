@@ -12,7 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { EmailEditor, type EmailBlock } from "@/components/email-editor/editor";
+import { EmailEditor, type EmailBlock, type DynamicField } from "@/components/email-editor/editor";
 import {
   Select,
   SelectContent,
@@ -81,9 +81,12 @@ export default function NewCampaignPage() {
   const [segments, setSegments] = useState<Segment[]>([]);
   const [selectedSegments, setSelectedSegments] = useState<string[]>([]);
   const [segmentsLoading, setSegmentsLoading] = useState(false);
-  const [segmentContactsLoading, setSegmentContactsLoading] = useState(false);
   const [recipientEmails, setRecipientEmails] = useState<string[]>([]);
   const [emailInput, setEmailInput] = useState("");
+
+  // SwipeOne dynamic variable fields (for email editor merge tags)
+  const [swipeOneFields, setSwipeOneFields] = useState<DynamicField[]>([]);
+  const [swipeOneFieldsLoading, setSwipeOneFieldsLoading] = useState(false);
 
   // Internal contacts
   const [internalContacts, setInternalContacts] = useState<Contact[]>([]);
@@ -167,32 +170,26 @@ export default function NewCampaignPage() {
     }
   };
 
-  const toggleSegment = async (segmentId: string) => {
-    const isSelected = selectedSegments.includes(segmentId);
-    if (isSelected) {
-      setSelectedSegments((prev) => prev.filter((id) => id !== segmentId));
-      return;
-    }
-    setSelectedSegments((prev) => [...prev, segmentId]);
-    setSegmentContactsLoading(true);
+  const loadSwipeOneFields = useCallback(async () => {
+    if (swipeOneFields.length > 0 || swipeOneFieldsLoading) return;
+    setSwipeOneFieldsLoading(true);
     try {
-      const res = await fetch(`/api/swipeone/contacts?segmentId=${segmentId}`);
+      const res = await fetch("/api/swipeone/fields");
       if (res.ok) {
         const data = await res.json();
-        const newEmails = (data.contacts || [])
-          .map((c: { email: string }) => c.email)
-          .filter((e: string) => e);
-        const combined = [...new Set([...recipientEmails, ...newEmails])];
-        setRecipientEmails(combined);
-        toast.success(`${newEmails.length} contact(s) loaded from segment`);
-      } else {
-        toast.error("Failed to load contacts from segment");
+        setSwipeOneFields(data.fields || []);
       }
     } catch {
-      toast.error("Failed to load contacts from segment");
+      // Silent — fields are optional; editor still has built-in CONTACT_PROPERTIES
     } finally {
-      setSegmentContactsLoading(false);
+      setSwipeOneFieldsLoading(false);
     }
+  }, [swipeOneFields.length, swipeOneFieldsLoading]);
+
+  const toggleSegment = (segmentId: string) => {
+    setSelectedSegments((prev) =>
+      prev.includes(segmentId) ? prev.filter((id) => id !== segmentId) : [...prev, segmentId]
+    );
   };
 
   const toggleInternalContact = (contact: Contact) => {
@@ -292,6 +289,10 @@ export default function NewCampaignPage() {
     setJsonContent(data.json);
   };
 
+  const selectedSegmentNames = segments
+    .filter((s) => selectedSegments.includes(s._id))
+    .map((s) => s.name);
+
   const handleSaveDraft = async () => {
     if (!name) {
       toast.error("Campaign name is required");
@@ -305,7 +306,11 @@ export default function NewCampaignPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name, subject, fromEmail, fromName,
-          htmlContent, jsonContent, recipientEmails, audienceSource, status: "draft",
+          htmlContent, jsonContent,
+          recipientEmails: audienceSource === "swipeone" ? [] : recipientEmails,
+          segmentIds: audienceSource === "swipeone" ? selectedSegments : undefined,
+          segmentNames: audienceSource === "swipeone" ? selectedSegmentNames : undefined,
+          audienceSource, status: "draft",
         }),
       });
       if (res.ok) {
@@ -334,7 +339,13 @@ export default function NewCampaignPage() {
       setActiveTab("content");
       return;
     }
-    if (recipientEmails.length === 0) {
+    if (audienceSource === "swipeone") {
+      if (selectedSegments.length === 0) {
+        toast.error("Select at least one SwipeOne segment");
+        setActiveTab("details");
+        return;
+      }
+    } else if (recipientEmails.length === 0) {
       toast.error("Add at least one recipient");
       setActiveTab("details");
       return;
@@ -346,7 +357,11 @@ export default function NewCampaignPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name, subject, fromEmail, fromName,
-          htmlContent, jsonContent, recipientEmails, audienceSource, status: "draft",
+          htmlContent, jsonContent,
+          recipientEmails: audienceSource === "swipeone" ? [] : recipientEmails,
+          segmentIds: audienceSource === "swipeone" ? selectedSegments : undefined,
+          segmentNames: audienceSource === "swipeone" ? selectedSegmentNames : undefined,
+          audienceSource, status: "draft",
         }),
       });
       if (!saveRes.ok) {
@@ -383,12 +398,17 @@ export default function NewCampaignPage() {
           <h1 className="text-xl font-semibold">New Campaign</h1>
         </div>
         <div className="flex items-center gap-2">
-          {recipientEmails.length > 0 && (
+          {audienceSource === "swipeone" && selectedSegments.length > 0 ? (
+            <Badge variant="secondary" className="text-xs">
+              <Globe className="h-3 w-3 mr-1" />
+              {selectedSegments.length} segment{selectedSegments.length !== 1 ? "s" : ""}
+            </Badge>
+          ) : recipientEmails.length > 0 ? (
             <Badge variant="secondary" className="text-xs">
               <Users className="h-3 w-3 mr-1" />
               {recipientEmails.length} recipient{recipientEmails.length !== 1 ? "s" : ""}
             </Badge>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -469,7 +489,11 @@ export default function NewCampaignPage() {
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
-                    onClick={() => { setAudienceSource("swipeone"); if (segments.length === 0) loadSegments(); }}
+                    onClick={() => {
+                      setAudienceSource("swipeone");
+                      if (segments.length === 0) loadSegments();
+                      loadSwipeOneFields();
+                    }}
                     className={cn(
                       "flex items-center gap-2 p-3 border text-left text-sm transition-colors",
                       audienceSource === "swipeone" ? "border-primary bg-primary/5" : "hover:bg-accent"
@@ -535,7 +559,6 @@ export default function NewCampaignPage() {
                                 id={`seg-${segment._id}`}
                                 checked={selectedSegments.includes(segment._id)}
                                 onCheckedChange={() => toggleSegment(segment._id)}
-                                disabled={segmentContactsLoading}
                               />
                               <label htmlFor={`seg-${segment._id}`} className="flex-1 cursor-pointer text-sm">
                                 {segment.name}
@@ -545,12 +568,35 @@ export default function NewCampaignPage() {
                         </div>
                       </ScrollArea>
                     )}
-                    {segmentContactsLoading && (
-                      <div className="flex items-center text-xs text-muted-foreground">
-                        <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                        Fetching contacts from segment...
+                    <p className="text-[10px] text-muted-foreground">
+                      Recipients are fetched from SwipeOne at send time — no contact data is pulled now.
+                    </p>
+
+                    {/* Available SwipeOne variables */}
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                          Available Variables {swipeOneFields.length > 0 && `(${swipeOneFields.length})`}
+                        </span>
+                        {swipeOneFieldsLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
                       </div>
-                    )}
+                      {swipeOneFields.length > 0 ? (
+                        <div className="flex flex-wrap gap-1 max-h-[120px] overflow-auto p-2 border bg-muted/30">
+                          {swipeOneFields.map((f) => (
+                            <Badge key={f.name} variant="outline" className="text-[10px] h-5 font-mono">
+                              {`{{${f.name}}}`}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : !swipeOneFieldsLoading ? (
+                        <p className="text-[10px] text-muted-foreground">
+                          Variable list will load once SwipeOne fields are fetched.
+                        </p>
+                      ) : null}
+                      <p className="text-[10px] text-muted-foreground">
+                        Use these in the editor (Content tab) — type <code className="font-mono">/</code> to insert.
+                      </p>
+                    </div>
                   </div>
                 )}
 
@@ -603,7 +649,8 @@ export default function NewCampaignPage() {
                   </div>
                 )}
 
-                {/* Manual email entry + CSV – always visible */}
+                {/* Manual email entry + CSV – hidden for SwipeOne source */}
+                {audienceSource !== "swipeone" && (
                 <div className="grid grid-cols-[1fr_auto] gap-2 items-start">
                   <Textarea
                     placeholder="Paste emails (comma or newline separated)"
@@ -624,9 +671,10 @@ export default function NewCampaignPage() {
                     </div>
                   </div>
                 </div>
+                )}
 
                 {/* Recipient summary */}
-                {recipientEmails.length > 0 && (
+                {audienceSource !== "swipeone" && recipientEmails.length > 0 && (
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium">{recipientEmails.length} recipient{recipientEmails.length !== 1 ? "s" : ""}</span>
@@ -674,7 +722,11 @@ export default function NewCampaignPage() {
                   <Separator />
                 </>
               )}
-              <EmailEditor initialBlocks={editorBlocks} onChange={handleEditorChange} />
+              <EmailEditor
+                initialBlocks={editorBlocks}
+                onChange={handleEditorChange}
+                dynamicFields={audienceSource === "swipeone" ? swipeOneFields : undefined}
+              />
             </TabsContent>
 
             {/* ── Tab 3: Review ──────────────────────────── */}
@@ -701,7 +753,13 @@ export default function NewCampaignPage() {
                 <div className="space-y-0.5">
                   <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Recipients</Label>
                   <p className="text-sm font-medium">
-                    {recipientEmails.length > 0 ? `${recipientEmails.length} recipient(s)` : "None added"}
+                    {audienceSource === "swipeone"
+                      ? selectedSegments.length > 0
+                        ? `${selectedSegments.length} SwipeOne segment(s) — fetched at send time`
+                        : "No segments selected"
+                      : recipientEmails.length > 0
+                      ? `${recipientEmails.length} recipient(s)`
+                      : "None added"}
                   </p>
                 </div>
               </div>

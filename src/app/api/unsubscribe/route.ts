@@ -61,13 +61,14 @@ export async function GET(request: NextRequest) {
         // SwipeOne integration is best-effort
       }
     } else {
-      // Internal audience → update local Contact: set flags + add opted_out tag
+      // Internal audience → update local Contact: set flags + add unsubscribed/opted_out tags
       const contact = await prisma.contact.findUnique({ where: { email } });
+      const wantedTags = ["unsubscribed", "user.marketing.opted_out"];
       if (contact) {
         let tags: string[] = [];
         try { tags = JSON.parse(contact.tags || "[]"); } catch { /* ignore */ }
-        if (!tags.includes("user.marketing.opted_out")) {
-          tags.push("user.marketing.opted_out");
+        for (const t of wantedTags) {
+          if (!tags.includes(t)) tags.push(t);
         }
         await prisma.contact.update({
           where: { email },
@@ -84,7 +85,7 @@ export async function GET(request: NextRequest) {
             email,
             isMarketingAllowed: false,
             emailMarketingConsent: false,
-            tags: JSON.stringify(["user.marketing.opted_out"]),
+            tags: JSON.stringify(wantedTags),
           },
         });
       }

@@ -16,9 +16,10 @@ model User {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  campaigns      Campaign[]
-  templates      EmailTemplate[]
-  aiPrompts      AiPrompt[]
+  campaigns        Campaign[]
+  templates        EmailTemplate[]
+  aiPrompts        AiPrompt[]
+  dynamicTemplates DynamicTemplate[]
 }
 
 model SesConfig {
@@ -119,6 +120,28 @@ model SwipeOneConfig {
   updatedAt   DateTime @updatedAt
 }
 
+// Audit trail of suppression tags successfully pushed to SwipeOne. Driven by
+// markContactAsUnsubscribed/Complained/Bounced. The suppressions page reads
+// this so the "Added Tag" column reflects what we actually sent (and SwipeOne
+// accepted with a 200 OK), not a guess.
+model SwipeOneTagAudit {
+  id          String   @id @default(uuid())
+  email       String   @unique
+  tags        String   // JSON array of tag strings
+  lastReason  String?  // unsubscribed | complained | bounced
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PopularVariable {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  label     String?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model AiConfig {
   id        String   @id @default(uuid())
   name      String   @default("Default")
@@ -144,6 +167,20 @@ model R2Config {
   updatedAt       DateTime @updatedAt
 }
 
+model DynamicTemplate {
+  id          String   @id @default(uuid())
+  name        String
+  subject     String?
+  htmlContent String
+  source      String   @default("manual") // "manual" | "ai"
+  aiMode      String?  // for AI sources: "true" | "product-update"
+  prompt      String?  // captured prompt for AI sources
+  createdBy   String
+  creator     User     @relation(fields: [createdBy], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
 model AiPrompt {
   id                String   @id @default(uuid())
   prompt            String
@@ -152,6 +189,8 @@ model AiPrompt {
   subject           String?  // subject used
   referenceImageUrl String?  // screenshot reference image URL
   aiMode            String   @default("true") // "true" | "screenshot" | "product-update"
+  generatedHtml     String?  // cached generation result for "Use Previous Result"
+  generatedSubject  String?  // cached subject from the same generation
   createdBy         String
   creator           User     @relation(fields: [createdBy], references: [id])
   createdAt         DateTime @default(now())

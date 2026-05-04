@@ -11,6 +11,9 @@ import {
   Settings,
   LogOut,
   Menu,
+  Globe,
+  Sparkles,
+  ShieldAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -32,10 +35,12 @@ interface User {
   role: "super_admin" | "general_user";
 }
 
-const navLinks = [
+const navLinks: { href: string; label: string; icon: typeof LayoutDashboard; exact?: boolean }[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/campaigns", label: "Campaigns", icon: Send },
+  { href: "/campaigns/swipeone/new", label: "SwipeOne Segment Only Campaign", icon: Globe, exact: true },
   { href: "/templates", label: "Templates", icon: FileText },
+  { href: "/templates/dynamic", label: "Dynamic Templates", icon: Sparkles, exact: true },
 ];
 
 function NavContent({
@@ -59,7 +64,18 @@ function NavContent({
       <nav className="flex-1 space-y-1 p-4">
         {navLinks.map((link) => {
           const Icon = link.icon;
-          const isActive = pathname === link.href || pathname.startsWith(link.href + "/");
+          // If a more-specific link in the list matches the current path, this link is not active.
+          const moreSpecific = navLinks.some(
+            (other) =>
+              other.href !== link.href &&
+              other.href.startsWith(link.href + "/") &&
+              (pathname === other.href || pathname.startsWith(other.href + "/"))
+          );
+          const isActive =
+            !moreSpecific &&
+            (link.exact
+              ? pathname === link.href
+              : pathname === link.href || pathname.startsWith(link.href + "/"));
           return (
             <Link
               key={link.href}
@@ -90,6 +106,18 @@ function NavContent({
             >
               <Users className="h-4 w-4" />
               Contacts
+            </Link>
+            <Link
+              href="/suppressions"
+              className={cn(
+                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                pathname === "/suppressions" || pathname.startsWith("/suppressions/")
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+              )}
+            >
+              <ShieldAlert className="h-4 w-4" />
+              Suppression List
             </Link>
             <Link
               href="/settings"

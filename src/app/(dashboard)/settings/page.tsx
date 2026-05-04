@@ -37,7 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Eye, EyeOff, Pencil, Plus, Power, Trash2 } from "lucide-react";
+import { Eye, EyeOff, Pencil, Plus, Power, Trash2, Star, X } from "lucide-react";
 import { toast } from "sonner";
 
 // --- Types ---
@@ -145,6 +145,14 @@ export default function SettingsPage() {
   const [testingSwipeone, setTestingSwipeone] = useState(false);
   const [showSwipeoneApiKey, setShowSwipeoneApiKey] = useState(false);
 
+  // Popular Variables
+  type PopularVariable = { id: string; name: string; label?: string | null };
+  const [popularVariables, setPopularVariables] = useState<PopularVariable[]>([]);
+  const [newPopularName, setNewPopularName] = useState("");
+  const [newPopularLabel, setNewPopularLabel] = useState("");
+  const [savingPopular, setSavingPopular] = useState(false);
+  const [swipeOneFieldList, setSwipeOneFieldList] = useState<{ name: string; label: string }[]>([]);
+
   // AI Config
   const [aiConfigs, setAiConfigs] = useState<AiConfigType[]>([]);
   const [aiForm, setAiForm] = useState<AiConfigType>(emptyAi);
@@ -197,6 +205,26 @@ export default function SettingsPage() {
     } catch { /* ignore */ }
   }, []);
 
+  const loadPopularVariables = useCallback(async () => {
+    try {
+      const res = await fetch("/api/swipeone/popular-variables");
+      if (res.ok) {
+        const data = await res.json();
+        setPopularVariables(data.variables || []);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const loadSwipeOneFieldList = useCallback(async () => {
+    try {
+      const res = await fetch("/api/swipeone/fields");
+      if (res.ok) {
+        const data = await res.json();
+        setSwipeOneFieldList(data.fields || []);
+      }
+    } catch { /* ignore — picker will fall back to free input */ }
+  }, []);
+
   const loadAiConfigs = useCallback(async () => {
     try {
       const res = await fetch("/api/ai-config");
@@ -238,13 +266,23 @@ export default function SettingsPage() {
     if (loading) return;
     loadSesConfigs();
     loadSwipeoneConfigs();
+    loadPopularVariables();
+    loadSwipeOneFieldList();
     loadAiConfigs();
     loadR2Configs();
     fetch("/api/users")
       .then((r) => r.json())
       .then((d) => setUsers(d.users || []))
       .catch(() => {});
-  }, [loading, loadSesConfigs, loadSwipeoneConfigs, loadAiConfigs, loadR2Configs]);
+  }, [
+    loading,
+    loadSesConfigs,
+    loadSwipeoneConfigs,
+    loadPopularVariables,
+    loadSwipeOneFieldList,
+    loadAiConfigs,
+    loadR2Configs,
+  ]);
 
   // --- SES Handlers ---
 
@@ -437,6 +475,82 @@ export default function SettingsPage() {
       toast.error("SwipeOne connection test failed");
     } finally {
       setTestingSwipeone(false);
+    }
+  };
+
+  // --- Popular Variables Handlers ---
+
+  const handleAddPopular = async () => {
+    const name = newPopularName.trim().replace(/^\{\{\s*/, "").replace(/\s*\}\}$/, "");
+    if (!name) {
+      toast.error("Variable name is required");
+      return;
+    }
+    if (!/^[\w.]+$/.test(name)) {
+      toast.error("Variable name can only contain letters, numbers, _ or .");
+      return;
+    }
+    setSavingPopular(true);
+    try {
+      const res = await fetch("/api/swipeone/popular-variables", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, label: newPopularLabel.trim() || undefined }),
+      });
+      if (res.ok) {
+        setNewPopularName("");
+        setNewPopularLabel("");
+        loadPopularVariables();
+        toast.success(`Added {{${name}}} to popular variables`);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to add popular variable");
+      }
+    } catch {
+      toast.error("Failed to add popular variable");
+    } finally {
+      setSavingPopular(false);
+    }
+  };
+
+  const handleQuickAddPopular = async (field: { name: string; label?: string }) => {
+    if (popularVariables.some((v) => v.name === field.name)) {
+      toast.error(`{{${field.name}}} is already popular`);
+      return;
+    }
+    setSavingPopular(true);
+    try {
+      const res = await fetch("/api/swipeone/popular-variables", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: field.name, label: field.label || undefined }),
+      });
+      if (res.ok) {
+        loadPopularVariables();
+        toast.success(`Added {{${field.name}}}`);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to add");
+      }
+    } catch {
+      toast.error("Failed to add");
+    } finally {
+      setSavingPopular(false);
+    }
+  };
+
+  const handleRemovePopular = async (id: string, name: string) => {
+    try {
+      const res = await fetch(`/api/swipeone/popular-variables/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setPopularVariables((prev) => prev.filter((v) => v.id !== id));
+        toast.success(`Removed {{${name}}}`);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to remove");
+      }
+    } catch {
+      toast.error("Failed to remove");
     }
   };
 
@@ -987,6 +1101,119 @@ export default function SettingsPage() {
                   </TableBody>
                 </Table>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Popular Variables Settings */}
+          <Card className="mt-6">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Star className="h-4 w-4 text-amber-500 fill-amber-500" />
+                    Popular Variables Settings
+                  </CardTitle>
+                  <CardDescription>
+                    Pin the SwipeOne variables you use most. They&apos;ll appear first in the
+                    Map Variables modal and be highlighted in the code editor for quicker
+                    insertion.
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Add via free input */}
+              <div className="space-y-2">
+                <Label className="text-xs">Add a variable</Label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    placeholder="Variable name (e.g. firstName)"
+                    value={newPopularName}
+                    onChange={(e) => setNewPopularName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleAddPopular();
+                      }
+                    }}
+                    className="h-9 max-w-[260px]"
+                  />
+                  <Input
+                    placeholder="Optional label"
+                    value={newPopularLabel}
+                    onChange={(e) => setNewPopularLabel(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleAddPopular();
+                      }
+                    }}
+                    className="h-9 max-w-[260px]"
+                  />
+                  <Button onClick={handleAddPopular} disabled={savingPopular || !newPopularName.trim()}>
+                    <Plus className="mr-1.5 h-4 w-4" />
+                    Add
+                  </Button>
+                </div>
+              </div>
+
+              {/* Quick-add from SwipeOne */}
+              {swipeOneFieldList.length > 0 && (
+                <div className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">
+                    Or quick-add from SwipeOne fields
+                  </Label>
+                  <div className="flex flex-wrap gap-1 max-h-[120px] overflow-auto p-2 border bg-muted/20">
+                    {swipeOneFieldList
+                      .filter((f) => !popularVariables.some((v) => v.name === f.name))
+                      .map((f) => (
+                        <button
+                          key={f.name}
+                          type="button"
+                          onClick={() => handleQuickAddPopular(f)}
+                          disabled={savingPopular}
+                          title={f.label !== f.name ? f.label : undefined}
+                          className="inline-flex items-center font-mono text-[10px] h-6 px-2 rounded border border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          + {`{{${f.name}}}`}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Pinned list */}
+              <div className="space-y-2">
+                <Label className="text-xs">
+                  Pinned ({popularVariables.length})
+                </Label>
+                {popularVariables.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-3">
+                    No popular variables yet — add some above.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {popularVariables.map((v) => (
+                      <span
+                        key={v.id}
+                        className="inline-flex items-center gap-1 font-mono text-xs h-7 pl-2 pr-1 rounded border border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-200"
+                        title={v.label || undefined}
+                      >
+                        <Star className="h-3 w-3 fill-amber-500 text-amber-500" />
+                        {`{{${v.name}}}`}
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePopular(v.id, v.name)}
+                          className="ml-1 h-5 w-5 inline-flex items-center justify-center rounded hover:bg-amber-200 dark:hover:bg-amber-900 transition-colors"
+                          title="Remove"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
 
