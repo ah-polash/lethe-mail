@@ -74,6 +74,8 @@ model Campaign {
   recipientEmails String?  // JSON array of recipient email addresses
   segmentIds      String?  // JSON array of SwipeOne segment IDs (future use)
   segmentNames    String?  // JSON array of segment names for display (future use)
+  categoryId      String?
+  category        CampaignCategory? @relation(fields: [categoryId], references: [id])
   createdBy       String
   creator         User     @relation(fields: [createdBy], references: [id])
   createdAt       DateTime @default(now())
@@ -215,4 +217,50 @@ model AiPrompt {
   createdBy         String
   creator           User     @relation(fields: [createdBy], references: [id])
   createdAt         DateTime @default(now())
+}
+
+model Product {
+  id              String   @id @default(uuid())
+  name            String
+  logoUrl         String?
+  wpOrgSlug       String?
+  landingPageUrl  String?
+  pricingPageUrl  String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model AppSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CampaignCategory {
+  id                     String   @id @default(uuid())
+  name                   String   @unique
+  slug                   String   @unique
+  description            String?
+  swipeOneTagOverride    String?  // when set, used as the SwipeOne tag instead of `slug`
+  autoCheckOnUnsubscribe Boolean  @default(false)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  campaigns    Campaign[]
+  unsubscribes CategoryUnsubscribe[]
+}
+
+model CategoryUnsubscribe {
+  id         String   @id @default(uuid())
+  email      String
+  categoryId String
+  category   CampaignCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  campaignId String?
+  createdAt  DateTime @default(now())
+
+  @@unique([email, categoryId])
+  @@index([email])
+  @@index([categoryId])
 }

@@ -149,13 +149,31 @@ export async function addTagsToContact(email: string, tags: string[]) {
   }
 }
 
-// AWS SES compliance: when a recipient unsubscribes, complains, or hard-bounces,
-// we tag the contact in SwipeOne so future automations and exports can exclude
-// them, AND flip "Email Marketing Consent" → unsubscribed on the contact record.
-// The legacy "user.marketing.opted_out" tag is always included for back-compat
-// with existing SwipeOne automations.
-async function markContactSuppressed(email: string, reason: "unsubscribed" | "complained" | "bounced") {
-  const tags = [reason, "user.marketing.opted_out"];
+// SwipeOne's /zapier/contact endpoint REPLACES the contact's tag list on each
+// call, so we must merge any new tags with everything we've ever successfully
+// pushed (tracked in SwipeOneTagAudit) before sending. Returns the merged set
+// that was actually written.
+async function pushTagsMergedWithAudit(
+  email: string,
+  newTags: string[],
+  reason: "unsubscribed" | "complained" | "bounced" | null
+) {
+  const cleaned = Array.from(
+    new Set(newTags.map((t) => String(t || "").trim()).filter(Boolean))
+  );
+
+  // Merge with prior audit so previously-pushed tags survive.
+  let prior: string[] = [];
+  try {
+    const existing = await prisma.swipeOneTagAudit.findUnique({ where: { email } });
+    if (existing?.tags) {
+      const arr = JSON.parse(existing.tags);
+      if (Array.isArray(arr)) prior = arr.map(String).filter(Boolean);
+    }
+  } catch { /* ignore */ }
+
+  const merged = Array.from(new Set([...prior, ...cleaned]));
+  if (merged.length === 0) return { tagSuccess: false, mergedTags: [] };
 
   // SwipeOne's /zapier/contact endpoint takes a comma-separated tags string.
   // The array form returns 500, so we don't try it.
@@ -163,38 +181,15 @@ async function markContactSuppressed(email: string, reason: "unsubscribed" | "co
   try {
     await swipeOneRequest("POST", `/zapier/contact`, {
       email,
-      tags: tags.join(","),
+      tags: merged.join(","),
     });
     tagSuccess = true;
   } catch (err) {
     console.warn("[swipeone] tag write failed for", email, err);
   }
 
-  // Flip Email Marketing Consent in a separate, minimal request so a malformed
-  // field can't poison the tag write above.
-  try {
-    await swipeOneRequest("POST", `/zapier/contact`, {
-      email,
-      marketing_email_subscription_status: "unsubscribed",
-    });
-  } catch (err) {
-    console.warn("[swipeone] marketing consent write failed for", email, err);
-  }
-
-  // Audit only on successful tag write — union with anything we previously
-  // pushed for this contact so the suppression page reflects the full set.
   if (tagSuccess) {
     try {
-      const existing = await prisma.swipeOneTagAudit.findUnique({ where: { email } });
-      let merged: string[] = [...tags];
-      if (existing?.tags) {
-        try {
-          const prev = JSON.parse(existing.tags);
-          if (Array.isArray(prev)) {
-            merged = Array.from(new Set([...prev.map(String), ...tags]));
-          }
-        } catch { /* ignore */ }
-      }
       await prisma.swipeOneTagAudit.upsert({
         where: { email },
         create: { email, tags: JSON.stringify(merged), lastReason: reason },
@@ -205,7 +200,35 @@ async function markContactSuppressed(email: string, reason: "unsubscribed" | "co
     }
   }
 
-  return { tagSuccess };
+  return { tagSuccess, mergedTags: merged };
+}
+
+async function setMarketingConsentUnsubscribed(email: string) {
+  // Flip Email Marketing Consent in a separate, minimal request so a malformed
+  // field can't poison the tag write.
+  try {
+    await swipeOneRequest("POST", `/zapier/contact`, {
+      email,
+      marketing_email_subscription_status: "unsubscribed",
+    });
+  } catch (err) {
+    console.warn("[swipeone] marketing consent write failed for", email, err);
+  }
+}
+
+// AWS SES compliance: when a recipient unsubscribes, complains, or hard-bounces,
+// we tag the contact in SwipeOne so future automations and exports can exclude
+// them, AND flip "Email Marketing Consent" → unsubscribed on the contact record.
+// The legacy "user.marketing.opted_out" tag is always included for back-compat
+// with existing SwipeOne automations.
+async function markContactSuppressed(email: string, reason: "unsubscribed" | "complained" | "bounced") {
+  const result = await pushTagsMergedWithAudit(
+    email,
+    [reason, "user.marketing.opted_out"],
+    reason
+  );
+  await setMarketingConsentUnsubscribed(email);
+  return result;
 }
 
 export async function markContactAsUnsubscribed(email: string) {
@@ -218,6 +241,63 @@ export async function markContactAsComplained(email: string) {
 
 export async function markContactAsBounced(email: string) {
   return markContactSuppressed(email, "bounced");
+}
+
+// Preference-center helpers: called from /api/unsubscribe whenever a recipient
+// updates their per-category preferences. Unlike the SES-webhook helpers
+// above, these REPLACE the SwipeOne tag list with exactly the tags the user's
+// preferences imply — no merging with prior audit. That way "Category A only"
+// produces just the `category-a` tag, not the cumulative set across every
+// past submission.
+async function setSwipeOneTagsExact(
+  email: string,
+  desiredTags: string[],
+  reason: "unsubscribed" | "complained" | "bounced" | null
+) {
+  const cleaned = Array.from(
+    new Set(desiredTags.map((t) => String(t || "").trim()).filter(Boolean))
+  );
+
+  let tagSuccess = false;
+  try {
+    await swipeOneRequest("POST", `/zapier/contact`, {
+      email,
+      // Empty string clears all tags on the SwipeOne contact, which is what
+      // we want when the user resubscribed from everything.
+      tags: cleaned.join(","),
+    });
+    tagSuccess = true;
+  } catch (err) {
+    console.warn("[swipeone] tag write failed for", email, err);
+  }
+
+  if (tagSuccess) {
+    try {
+      await prisma.swipeOneTagAudit.upsert({
+        where: { email },
+        create: { email, tags: JSON.stringify(cleaned), lastReason: reason },
+        update: { tags: JSON.stringify(cleaned), lastReason: reason },
+      });
+    } catch (err) {
+      console.warn("[swipeone] failed to record tag audit for", email, err);
+    }
+  }
+
+  return { tagSuccess, tags: cleaned };
+}
+
+export async function tagContactWithCategorySlugs(email: string, slugs: string[]) {
+  return setSwipeOneTagsExact(email, slugs, "unsubscribed");
+}
+
+export async function tagContactAllEmailsUnsubscribed(email: string) {
+  const result = await setSwipeOneTagsExact(
+    email,
+    ["all_emails", "user.marketing.opted_out"],
+    "unsubscribed"
+  );
+  await setMarketingConsentUnsubscribed(email);
+  return result;
 }
 
 // Send event for a contact

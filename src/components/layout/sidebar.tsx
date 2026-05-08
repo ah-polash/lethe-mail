@@ -14,6 +14,7 @@ import {
   Globe,
   Sparkles,
   ShieldAlert,
+  UserMinus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -106,6 +107,18 @@ function NavContent({
             >
               <Users className="h-4 w-4" />
               Contacts
+            </Link>
+            <Link
+              href="/unsubscribers"
+              className={cn(
+                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                pathname === "/unsubscribers" || pathname.startsWith("/unsubscribers/")
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+              )}
+            >
+              <UserMinus className="h-4 w-4" />
+              Unsubscribers
             </Link>
             <Link
               href="/suppressions"

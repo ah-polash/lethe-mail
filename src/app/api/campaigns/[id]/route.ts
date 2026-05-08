@@ -47,8 +47,94 @@ export async function GET(
         createdAt: e.createdAt,
       }));
 
+    // Unsubscribe activity from the preference center. Each event's metadata
+    // captures whether the user picked "all" or a specific set of categories.
+    // Resolve category ids → slugs/names so the report can render them.
+    const rawUnsubEvents = campaign.events
+      .filter((e) => e.eventType === "unsubscribed")
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+    const referencedCategoryIds = new Set<string>();
+    type ParsedUnsub = {
+      id: string;
+      email: string;
+      createdAt: Date;
+      scope: "all" | "categories";
+      categoryIds: string[];
+    };
+    const parsed: ParsedUnsub[] = rawUnsubEvents.map((e) => {
+      let scope: "all" | "categories" = "all";
+      let categoryIds: string[] = [];
+      try {
+        const meta = JSON.parse(e.metadata || "{}");
+        if (meta?.scope === "categories") {
+          scope = "categories";
+          if (Array.isArray(meta.categoryIds)) {
+            categoryIds = meta.categoryIds.filter(
+              (x: unknown): x is string => typeof x === "string"
+            );
+            for (const cid of categoryIds) referencedCategoryIds.add(cid);
+          }
+        } else if (meta?.scope === "all") {
+          scope = "all";
+        }
+      } catch { /* ignore — treat as "all" */ }
+      return {
+        id: e.id,
+        email: e.email,
+        createdAt: e.createdAt,
+        scope,
+        categoryIds,
+      };
+    });
+
+    let categoryById = new Map<string, { id: string; slug: string; name: string }>();
+    if (referencedCategoryIds.size > 0) {
+      const cats = await prisma.campaignCategory.findMany({
+        where: { id: { in: Array.from(referencedCategoryIds) } },
+        select: { id: true, slug: true, name: true },
+      });
+      categoryById = new Map(cats.map((c) => [c.id, c]));
+    }
+
+    const unsubscribeEvents = parsed.map((p) => ({
+      id: p.id,
+      email: p.email,
+      createdAt: p.createdAt,
+      scope: p.scope,
+      categories: p.categoryIds
+        .map((cid) => categoryById.get(cid))
+        .filter((c): c is { id: string; slug: string; name: string } => !!c),
+    }));
+
+    const unsubscribeSummary = {
+      total: unsubscribeEvents.length,
+      all: unsubscribeEvents.filter((e) => e.scope === "all").length,
+      categories: unsubscribeEvents.filter((e) => e.scope === "categories").length,
+      // Counts how many events touched each category slug (one event can hit many).
+      perCategory: (() => {
+        const counts: Record<string, { slug: string; name: string; count: number }> = {};
+        for (const e of unsubscribeEvents) {
+          for (const c of e.categories) {
+            const cur = counts[c.id] ?? { slug: c.slug, name: c.name, count: 0 };
+            cur.count += 1;
+            counts[c.id] = cur;
+          }
+        }
+        return Object.values(counts).sort((a, b) => b.count - a.count);
+      })(),
+    };
+
     const { events: _, ...campaignData } = campaign;
-    return NextResponse.json({ campaign: { ...campaignData, eventCounts, failedEvents } });
+    return NextResponse.json({
+      campaign: {
+        ...campaignData,
+        eventCounts,
+        failedEvents,
+        unsubscribeEvents,
+        unsubscribeSummary,
+      },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal server error";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -80,7 +166,7 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const { name, subject, fromEmail, fromName, htmlContent, templateId, recipientEmails, segmentIds, segmentNames, audienceSource } = body;
+    const { name, subject, fromEmail, fromName, htmlContent, templateId, recipientEmails, segmentIds, segmentNames, audienceSource, categoryId } = body;
 
     const emails: string[] | undefined = recipientEmails;
 
@@ -104,6 +190,7 @@ export async function PUT(
           segmentNames: JSON.stringify(segmentNames),
         }),
         ...(audienceSource !== undefined && { audienceSource }),
+        ...(categoryId !== undefined && { categoryId: categoryId || null }),
       },
     });
 
@@ -130,9 +217,13 @@ export async function DELETE(
       return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
     }
 
-    if (campaign.status !== "draft") {
+    // Drafts and scheduled campaigns can be deleted (scheduled = future send
+    // that hasn't fired yet, equivalent to cancelling). Anything that has
+    // already sent or is currently sending stays around so analytics and
+    // bounce/complaint events keep their parent campaign intact.
+    if (campaign.status !== "draft" && campaign.status !== "scheduled") {
       return NextResponse.json(
-        { error: "Only draft campaigns can be deleted" },
+        { error: "Only draft or scheduled campaigns can be deleted" },
         { status: 400 }
       );
     }

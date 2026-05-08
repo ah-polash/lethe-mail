@@ -127,8 +127,21 @@ export async function POST(
     });
 
     for (const event of suppressedEvents) {
-      if (event.eventType === "complained" || event.eventType === "unsubscribed") {
+      if (event.eventType === "complained") {
         suppressedEmails.add(event.email);
+      }
+      if (event.eventType === "unsubscribed") {
+        // Global unsubscribe (no specific category) → always suppress.
+        // Category-scoped unsubscribes are tracked in CategoryUnsubscribe and
+        // handled below; we don't suppress on those here.
+        let scope: string | undefined;
+        try {
+          const meta = JSON.parse(event.metadata || "{}");
+          scope = typeof meta?.scope === "string" ? meta.scope : undefined;
+        } catch { /* ignore */ }
+        if (scope !== "categories") {
+          suppressedEmails.add(event.email);
+        }
       }
       // Only suppress permanent/hard bounces, not transient send failures
       if (event.eventType === "bounced") {
@@ -139,6 +152,19 @@ export async function POST(
           }
         } catch { /* ignore */ }
       }
+    }
+
+    // Per-category unsubscribes: if this campaign is tagged with a category,
+    // suppress recipients who unsubscribed from that specific category.
+    if (campaign.categoryId) {
+      const categoryOptOuts = await prisma.categoryUnsubscribe.findMany({
+        where: {
+          categoryId: campaign.categoryId,
+          email: { in: recipientEmails },
+        },
+        select: { email: true },
+      });
+      for (const row of categoryOptOuts) suppressedEmails.add(row.email);
     }
 
     // Filter out suppressed recipients

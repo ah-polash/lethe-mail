@@ -42,6 +42,27 @@ interface FailedEvent {
   createdAt: string;
 }
 
+interface UnsubCategoryRef {
+  id: string;
+  slug: string;
+  name: string;
+}
+
+interface UnsubscribeEvent {
+  id: string;
+  email: string;
+  createdAt: string;
+  scope: "all" | "categories";
+  categories: UnsubCategoryRef[];
+}
+
+interface UnsubscribeSummary {
+  total: number;
+  all: number;
+  categories: number;
+  perCategory: { slug: string; name: string; count: number }[];
+}
+
 interface CampaignData {
   id: string;
   name: string;
@@ -54,6 +75,8 @@ interface CampaignData {
   totalUnsubscribed: number;
   eventCounts: Record<string, number>;
   failedEvents: FailedEvent[];
+  unsubscribeEvents?: UnsubscribeEvent[];
+  unsubscribeSummary?: UnsubscribeSummary;
 }
 
 interface CampaignEvent {
@@ -227,6 +250,107 @@ export default function CampaignReportPage() {
                 </div>
               ))}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Unsubscription Activities Breakdown */}
+      {campaign.unsubscribeSummary && campaign.unsubscribeSummary.total > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <UserMinus className="h-5 w-5 text-muted-foreground" />
+              Unsubscription Activities Breakdown
+            </CardTitle>
+            <CardDescription>
+              What recipients chose on the preference page from this campaign.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div className="text-center p-3 rounded-lg bg-muted">
+                <p className="text-lg font-bold">{campaign.unsubscribeSummary.total}</p>
+                <p className="text-xs text-muted-foreground mt-1">Total events</p>
+              </div>
+              <div className="text-center p-3 rounded-lg bg-muted">
+                <p className="text-lg font-bold">{campaign.unsubscribeSummary.all}</p>
+                <p className="text-xs text-muted-foreground mt-1">Unsubscribed from all</p>
+              </div>
+              <div className="text-center p-3 rounded-lg bg-muted">
+                <p className="text-lg font-bold">{campaign.unsubscribeSummary.categories}</p>
+                <p className="text-xs text-muted-foreground mt-1">Category-only</p>
+              </div>
+            </div>
+
+            {campaign.unsubscribeSummary.perCategory.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  By category
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {campaign.unsubscribeSummary.perCategory.map((c) => (
+                    <Badge
+                      key={c.slug}
+                      variant="secondary"
+                      className="text-[11px] font-mono"
+                      title={c.name}
+                    >
+                      {c.slug}
+                      <span className="ml-1.5 text-muted-foreground">×{c.count}</span>
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {campaign.unsubscribeEvents && campaign.unsubscribeEvents.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Recent activity
+                </p>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Unsubscribed From</TableHead>
+                      <TableHead className="whitespace-nowrap">When</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {campaign.unsubscribeEvents.map((ev) => (
+                      <TableRow key={ev.id}>
+                        <TableCell className="font-mono text-sm">{ev.email}</TableCell>
+                        <TableCell>
+                          {ev.scope === "all" ? (
+                            <Badge variant="destructive" className="text-[10px]">
+                              All emails
+                            </Badge>
+                          ) : ev.categories.length === 0 ? (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {ev.categories.map((c) => (
+                                <Badge
+                                  key={c.id}
+                                  variant="secondary"
+                                  className="text-[10px] font-mono"
+                                  title={c.name}
+                                >
+                                  {c.slug}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                          {new Date(ev.createdAt).toLocaleString()}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

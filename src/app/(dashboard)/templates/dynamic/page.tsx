@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Sparkles, Trash2, Eye, ArrowRight, Search } from "lucide-react";
+import { Sparkles, Trash2, Eye, ArrowRight, Search, LayoutGrid, Columns2, Columns3, Columns4, Grid3x3 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -48,7 +48,29 @@ interface DynamicTemplate {
 }
 
 type SourceFilter = "all" | "manual" | "ai";
-type ModeFilter = "all" | "true" | "product-update";
+type ModeFilter =
+  | "all"
+  | "true"
+  | "product-update"
+  | "product-security"
+  | "product-marketing"
+  | "summer-sale"
+  | "bfcm-sale"
+  | "ceo-offer";
+type ColCount = 1 | 2 | 3 | 4 | 5;
+
+const AI_MODE_LABELS: Record<string, string> = {
+  "true": "Regular",
+  "product-update": "Product Update",
+  "product-security": "Product Security",
+  "product-marketing": "Product Marketing",
+  "summer-sale": "Summer Sale",
+  "bfcm-sale": "BFCM Sale",
+  "ceo-offer": "CEOs Offer",
+};
+
+const aiModeLabel = (mode: string | null | undefined) =>
+  mode ? AI_MODE_LABELS[mode] ?? mode : "";
 
 export default function DynamicTemplatesPage() {
   const [templates, setTemplates] = useState<DynamicTemplate[]>([]);
@@ -57,6 +79,29 @@ export default function DynamicTemplatesPage() {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [modeFilter, setModeFilter] = useState<ModeFilter>("all");
   const [previewTemplate, setPreviewTemplate] = useState<DynamicTemplate | null>(null);
+  const [cols, setCols] = useState<ColCount>(3);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("dynamic-templates-grid-cols");
+    const n = Number(saved);
+    if (n >= 1 && n <= 5) setCols(n as ColCount);
+  }, []);
+
+  const updateCols = (n: ColCount) => {
+    setCols(n);
+    localStorage.setItem("dynamic-templates-grid-cols", String(n));
+  };
+
+  const gridClass =
+    cols === 1
+      ? "grid-cols-1"
+      : cols === 2
+        ? "grid-cols-1 sm:grid-cols-2"
+        : cols === 3
+          ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+          : cols === 4
+            ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5";
 
   const fetchTemplates = async () => {
     setLoading(true);
@@ -120,13 +165,34 @@ export default function DynamicTemplatesPage() {
             AI-generated and manually saved templates with dynamic variable placeholders.
           </p>
         </div>
-        <Link
-          href="/campaigns/swipeone/new"
-          className={cn(buttonVariants())}
-        >
-          New Campaign
-          <ArrowRight className="ml-2 h-4 w-4" />
-        </Link>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center border divide-x">
+            {([1, 2, 3, 4, 5] as const).map((n) => (
+              <button
+                key={n}
+                onClick={() => updateCols(n)}
+                className={cn(
+                  "p-1.5 transition-colors",
+                  cols === n ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"
+                )}
+                title={`${n} column${n > 1 ? "s" : ""}`}
+              >
+                {n === 1 && <LayoutGrid className="h-4 w-4" />}
+                {n === 2 && <Columns2 className="h-4 w-4" />}
+                {n === 3 && <Columns3 className="h-4 w-4" />}
+                {n === 4 && <Columns4 className="h-4 w-4" />}
+                {n === 5 && <Grid3x3 className="h-4 w-4" />}
+              </button>
+            ))}
+          </div>
+          <Link
+            href="/campaigns/swipeone/new"
+            className={cn(buttonVariants())}
+          >
+            New Campaign
+            <ArrowRight className="ml-2 h-4 w-4" />
+          </Link>
+        </div>
       </div>
 
       {/* Filters */}
@@ -157,7 +223,12 @@ export default function DynamicTemplatesPage() {
           <SelectContent>
             <SelectItem value="all">All AI modes</SelectItem>
             <SelectItem value="true">Regular Email</SelectItem>
-            <SelectItem value="product-update">Product Feature Update</SelectItem>
+            <SelectItem value="product-update">Product Update</SelectItem>
+            <SelectItem value="product-security">Product Security</SelectItem>
+            <SelectItem value="product-marketing">Product Marketing</SelectItem>
+            <SelectItem value="summer-sale">Summer Sale</SelectItem>
+            <SelectItem value="bfcm-sale">BFCM Sale</SelectItem>
+            <SelectItem value="ceo-offer">CEOs Offer</SelectItem>
           </SelectContent>
         </Select>
         <span className="text-xs text-muted-foreground ml-auto">
@@ -180,9 +251,32 @@ export default function DynamicTemplatesPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className={cn("grid gap-3", gridClass)}>
           {filtered.map((t) => (
-            <Card key={t.id} className="flex flex-col">
+            <Card key={t.id} className="flex flex-col overflow-hidden p-0">
+              <button
+                type="button"
+                onClick={() => setPreviewTemplate(t)}
+                className="border-b bg-white h-80 overflow-hidden relative group/thumb text-left"
+                title="Click to preview"
+              >
+                {t.htmlContent ? (
+                  <div
+                    className="transform scale-[0.25] origin-top-left w-[400%] h-[400%] pointer-events-none"
+                    dangerouslySetInnerHTML={{ __html: t.htmlContent }}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
+                    No preview
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover/thumb:opacity-100">
+                  <span className="bg-white/90 text-foreground rounded-full px-3 py-1 text-xs flex items-center gap-1">
+                    <Eye className="h-3 w-3" />
+                    Preview
+                  </span>
+                </div>
+              </button>
               <CardContent className="p-4 flex flex-col gap-2 flex-1">
                 <div className="flex items-start justify-between gap-2">
                   <h3 className="text-sm font-semibold truncate flex-1" title={t.name}>
@@ -200,7 +294,7 @@ export default function DynamicTemplatesPage() {
                 )}
                 {t.aiMode && (
                   <Badge variant="outline" className="text-[10px] w-fit">
-                    {t.aiMode === "product-update" ? "Product Update" : "Regular"}
+                    {aiModeLabel(t.aiMode)}
                   </Badge>
                 )}
                 {t.prompt && (
@@ -272,8 +366,7 @@ export default function DynamicTemplatesPage() {
             <DialogDescription>
               {previewTemplate?.subject || "No subject"} —{" "}
               {previewTemplate?.source === "manual" ? "Saved" : "AI"}{" "}
-              {previewTemplate?.aiMode &&
-                `(${previewTemplate.aiMode === "product-update" ? "Product Update" : "Regular"})`}
+              {previewTemplate?.aiMode && `(${aiModeLabel(previewTemplate.aiMode)})`}
             </DialogDescription>
           </DialogHeader>
           <ScrollArea className="h-[68vh] border bg-white">

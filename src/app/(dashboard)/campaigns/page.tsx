@@ -2,7 +2,18 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Trash2, Eye, Pencil, ScrollText, Loader2, RefreshCw } from "lucide-react";
+import { useRouter } from "next/navigation";
+import {
+  Plus,
+  Trash2,
+  Eye,
+  Pencil,
+  ScrollText,
+  Loader2,
+  RefreshCw,
+  CalendarClock,
+  Copy,
+} from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -15,9 +26,12 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -49,6 +63,26 @@ interface Campaign {
   totalSent: number;
   totalOpened: number;
   createdAt: string;
+  scheduledAt: string | null;
+  audienceSource: string;
+}
+
+function editorRouteFor(campaign: { id: string; audienceSource: string }): string {
+  return campaign.audienceSource === "swipeone"
+    ? `/campaigns/swipeone/${campaign.id}`
+    : `/campaigns/${campaign.id}`;
+}
+
+// Convert an ISO timestamp to the value format expected by
+// <input type="datetime-local"> (`YYYY-MM-DDTHH:mm`) in the browser's local
+// timezone, which is what the user is editing in.
+function isoToLocalInput(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  );
 }
 
 const statusVariant: Record<string, "secondary" | "outline" | "default" | "destructive"> = {
@@ -89,8 +123,15 @@ interface WebhookLog {
 }
 
 export default function CampaignsPage() {
+  const router = useRouter();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+
+  // Reschedule dialog
+  const [rescheduleCampaign, setRescheduleCampaign] = useState<Campaign | null>(null);
+  const [rescheduleAt, setRescheduleAt] = useState("");
+  const [rescheduling, setRescheduling] = useState(false);
 
   // Campaign log dialog
   const [logCampaign, setLogCampaign] = useState<Campaign | null>(null);
@@ -162,6 +203,73 @@ export default function CampaignsPage() {
     fetchCampaigns();
   }, []);
 
+  const openReschedule = (campaign: Campaign) => {
+    setRescheduleCampaign(campaign);
+    setRescheduleAt(
+      campaign.scheduledAt
+        ? isoToLocalInput(campaign.scheduledAt)
+        : ""
+    );
+  };
+
+  const handleReschedule = async () => {
+    if (!rescheduleCampaign) return;
+    if (!rescheduleAt) {
+      toast.error("Pick a new send time");
+      return;
+    }
+    const newDate = new Date(rescheduleAt);
+    if (isNaN(newDate.getTime())) {
+      toast.error("Invalid date/time");
+      return;
+    }
+    if (newDate.getTime() <= Date.now()) {
+      toast.error("New time must be in the future");
+      return;
+    }
+
+    setRescheduling(true);
+    try {
+      const res = await fetch(`/api/campaigns/${rescheduleCampaign.id}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scheduledAt: newDate.toISOString() }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to reschedule");
+      }
+      toast.success(`Rescheduled for ${newDate.toLocaleString()}`);
+      setRescheduleCampaign(null);
+      setRescheduleAt("");
+      await fetchCampaigns();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to reschedule");
+    } finally {
+      setRescheduling(false);
+    }
+  };
+
+  const handleDuplicate = async (campaign: Campaign) => {
+    setDuplicatingId(campaign.id);
+    try {
+      const res = await fetch(`/api/campaigns/${campaign.id}/duplicate`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to duplicate campaign");
+      }
+      const data = await res.json();
+      const newId = data.campaign?.id as string | undefined;
+      if (!newId) throw new Error("Duplicate API did not return a new campaign id");
+      toast.success("Campaign duplicated as draft");
+      const newAudience = (data.campaign?.audienceSource as string) || campaign.audienceSource;
+      router.push(editorRouteFor({ id: newId, audienceSource: newAudience }));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to duplicate");
+      setDuplicatingId(null);
+    }
+  };
+
   const handleDelete = async (id: string) => {
     try {
       const res = await fetch(`/api/campaigns/${id}`, { method: "DELETE" });
@@ -185,7 +293,7 @@ export default function CampaignsPage() {
             Manage your email campaigns
           </p>
         </div>
-        <Link href="/campaigns/new" className={cn(buttonVariants())}>
+        <Link href="/campaigns/swipeone/new" className={cn(buttonVariants())}>
             <Plus className="mr-2 h-4 w-4" />
             New Campaign
         </Link>
@@ -202,7 +310,7 @@ export default function CampaignsPage() {
               <p className="text-muted-foreground text-sm mb-4">
                 No campaigns yet
               </p>
-              <Link href="/campaigns/new" className={cn(buttonVariants())}>Create your first campaign</Link>
+              <Link href="/campaigns/swipeone/new" className={cn(buttonVariants())}>Create your first campaign</Link>
             </div>
           ) : (
             <Table>
@@ -224,12 +332,19 @@ export default function CampaignsPage() {
                       {campaign.name}
                     </TableCell>
                     <TableCell>
-                      <Badge
-                        variant={statusVariant[campaign.status] || "secondary"}
-                        className={statusColors[campaign.status] || ""}
-                      >
-                        {campaign.status}
-                      </Badge>
+                      <div className="flex flex-col items-start gap-1">
+                        <Badge
+                          variant={statusVariant[campaign.status] || "secondary"}
+                          className={statusColors[campaign.status] || ""}
+                        >
+                          {campaign.status}
+                        </Badge>
+                        {campaign.status === "scheduled" && campaign.scheduledAt && (
+                          <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                            {new Date(campaign.scheduledAt).toLocaleString()}
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="text-right">
                       {(campaign.totalRecipients || 0).toLocaleString()}
@@ -254,46 +369,98 @@ export default function CampaignsPage() {
                           <ScrollText className="h-4 w-4 text-amber-600" />
                         </Button>
                         {campaign.status === "sent" && (
-                          <Link href={`/campaigns/${campaign.id}/report`} className={cn(buttonVariants({ variant: "ghost", size: "icon" }))}>
-                              <Eye className="h-4 w-4" />
+                          <Link
+                            href={`/campaigns/${campaign.id}/report`}
+                            className={cn(buttonVariants({ variant: "ghost", size: "icon" }))}
+                            title="View report"
+                          >
+                            <Eye className="h-4 w-4" />
                           </Link>
                         )}
                         {campaign.status === "draft" && (
-                          <>
-                            <Link href={`/campaigns/${campaign.id}`} className={cn(buttonVariants({ variant: "ghost", size: "icon" }))}>
-                                <Pencil className="h-4 w-4" />
-                            </Link>
-                            <AlertDialog>
-                              <AlertDialogTrigger render={<Button variant="ghost" size="icon" />}>
-                                  <Trash2 className="h-4 w-4 text-destructive" />
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>
-                                    Delete Campaign
-                                  </AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    Are you sure you want to delete &quot;{campaign.name}&quot;? This action cannot be undone.
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction
-                                    onClick={() => handleDelete(campaign.id)}
-                                  >
-                                    Delete
-                                  </AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          </>
+                          <Link href={editorRouteFor(campaign)} className={cn(buttonVariants({ variant: "ghost", size: "icon" }))} title="Edit">
+                              <Pencil className="h-4 w-4" />
+                          </Link>
                         )}
                         {campaign.status !== "draft" &&
-                          campaign.status !== "sent" && (
-                            <Link href={`/campaigns/${campaign.id}`} className={cn(buttonVariants({ variant: "ghost", size: "icon" }))}>
+                          campaign.status !== "sent" &&
+                          campaign.status !== "scheduled" && (
+                            <Link href={editorRouteFor(campaign)} className={cn(buttonVariants({ variant: "ghost", size: "icon" }))} title="View">
                                 <Eye className="h-4 w-4" />
                             </Link>
                           )}
+                        {campaign.status === "scheduled" && (
+                          <>
+                            <Link
+                              href={editorRouteFor(campaign)}
+                              className={cn(buttonVariants({ variant: "ghost", size: "icon" }))}
+                              title="View"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Link>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Reschedule"
+                              onClick={() => openReschedule(campaign)}
+                            >
+                              <CalendarClock className="h-4 w-4 text-blue-600" />
+                            </Button>
+                          </>
+                        )}
+                        {(campaign.status === "sent" || campaign.status === "scheduled") && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Duplicate as draft"
+                            onClick={() => handleDuplicate(campaign)}
+                            disabled={duplicatingId === campaign.id}
+                          >
+                            {duplicatingId === campaign.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Copy className="h-4 w-4 text-emerald-600" />
+                            )}
+                          </Button>
+                        )}
+                        {(campaign.status === "draft" || campaign.status === "scheduled") && (
+                          <AlertDialog>
+                            <AlertDialogTrigger render={<Button variant="ghost" size="icon" />}>
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>
+                                  {campaign.status === "scheduled" ? "Cancel & Delete Scheduled Campaign" : "Delete Campaign"}
+                                </AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  {campaign.status === "scheduled" ? (
+                                    <>
+                                      &quot;{campaign.name}&quot; is scheduled to send
+                                      {campaign.scheduledAt
+                                        ? ` on ${new Date(campaign.scheduledAt).toLocaleString()}`
+                                        : ""}.
+                                      Deleting will cancel that send. This action cannot be undone.
+                                    </>
+                                  ) : (
+                                    <>
+                                      Are you sure you want to delete &quot;{campaign.name}&quot;?
+                                      This action cannot be undone.
+                                    </>
+                                  )}
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => handleDelete(campaign.id)}
+                                >
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -303,6 +470,60 @@ export default function CampaignsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Reschedule dialog */}
+      <Dialog
+        open={rescheduleCampaign !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRescheduleCampaign(null);
+            setRescheduleAt("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CalendarClock className="h-5 w-5 text-blue-600" />
+              Reschedule Campaign
+            </DialogTitle>
+            <DialogDescription>
+              {rescheduleCampaign?.name}
+              {rescheduleCampaign?.scheduledAt && (
+                <span className="block text-xs text-muted-foreground mt-1">
+                  Currently scheduled for{" "}
+                  {new Date(rescheduleCampaign.scheduledAt).toLocaleString()}
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="reschedule-at">New send time</Label>
+            <Input
+              id="reschedule-at"
+              type="datetime-local"
+              value={rescheduleAt}
+              onChange={(e) => setRescheduleAt(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Times are interpreted in your local timezone.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRescheduleCampaign(null)}
+              disabled={rescheduling}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleReschedule} disabled={rescheduling}>
+              {rescheduling && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Save new time
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Campaign log dialog (dev/test) */}
       <Dialog

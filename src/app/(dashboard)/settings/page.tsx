@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -88,6 +90,48 @@ interface R2ConfigType {
   bucketName: string;
   publicUrl: string;
   isActive?: boolean;
+}
+
+interface ProductType {
+  id?: string;
+  name: string;
+  logoUrl: string;
+  wpOrgSlug: string;
+  landingPageUrl: string;
+  pricingPageUrl: string;
+}
+
+const emptyProduct: ProductType = {
+  name: "",
+  logoUrl: "",
+  wpOrgSlug: "",
+  landingPageUrl: "",
+  pricingPageUrl: "",
+};
+
+interface CampaignCategoryType {
+  id?: string;
+  name: string;
+  slug: string;
+  description: string;
+  swipeOneTagOverride: string;
+  autoCheckOnUnsubscribe: boolean;
+}
+
+const emptyCategory: CampaignCategoryType = {
+  name: "",
+  slug: "",
+  description: "",
+  swipeOneTagOverride: "",
+  autoCheckOnUnsubscribe: false,
+};
+
+function slugifyName(s: string): string {
+  return s
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 const emptySes: SesConfig = {
@@ -172,6 +216,21 @@ export default function SettingsPage() {
   const [showR2AccessKey, setShowR2AccessKey] = useState(false);
   const [showR2SecretKey, setShowR2SecretKey] = useState(false);
 
+  // Products (App Settings)
+  const [products, setProducts] = useState<ProductType[]>([]);
+  const [productRows, setProductRows] = useState<ProductType[]>([]);
+  const [savingProducts, setSavingProducts] = useState(false);
+
+  // Campaign Categories (App Settings)
+  const [categories, setCategories] = useState<CampaignCategoryType[]>([]);
+  const [categoryRows, setCategoryRows] = useState<CampaignCategoryType[]>([]);
+  const [savingCategories, setSavingCategories] = useState(false);
+
+  // Prompt configuration (AI Settings)
+  const [predefinedInstruction, setPredefinedInstruction] = useState("");
+  const [predefinedInstructionLoaded, setPredefinedInstructionLoaded] = useState("");
+  const [savingPredefinedInstruction, setSavingPredefinedInstruction] = useState(false);
+
   // Users
   const [users, setUsers] = useState<User[]>([]);
   const [userDialogOpen, setUserDialogOpen] = useState(false);
@@ -245,6 +304,64 @@ export default function SettingsPage() {
     } catch { /* ignore */ }
   }, []);
 
+  const loadPredefinedInstruction = useCallback(async () => {
+    try {
+      const res = await fetch("/api/app-settings?key=predefinedInstruction");
+      if (res.ok) {
+        const data = await res.json();
+        const v = typeof data?.value === "string" ? data.value : "";
+        setPredefinedInstruction(v);
+        setPredefinedInstructionLoaded(v);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const loadCategories = useCallback(async () => {
+    try {
+      const res = await fetch("/api/campaign-categories");
+      if (res.ok) {
+        const data = await res.json();
+        type ApiCategory = {
+          id?: string;
+          name?: string;
+          slug?: string;
+          description?: string | null;
+          swipeOneTagOverride?: string | null;
+          autoCheckOnUnsubscribe?: boolean;
+        };
+        const list: CampaignCategoryType[] = (data.categories || []).map((c: ApiCategory) => ({
+          id: c.id,
+          name: c.name || "",
+          slug: c.slug || "",
+          description: c.description || "",
+          swipeOneTagOverride: c.swipeOneTagOverride || "",
+          autoCheckOnUnsubscribe: !!c.autoCheckOnUnsubscribe,
+        }));
+        setCategories(list);
+        setCategoryRows(list);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const loadProducts = useCallback(async () => {
+    try {
+      const res = await fetch("/api/products");
+      if (res.ok) {
+        const data = await res.json();
+        const list: ProductType[] = (data.products || []).map((p: Partial<ProductType>) => ({
+          id: p.id,
+          name: p.name || "",
+          logoUrl: p.logoUrl || "",
+          wpOrgSlug: p.wpOrgSlug || "",
+          landingPageUrl: p.landingPageUrl || "",
+          pricingPageUrl: p.pricingPageUrl || "",
+        }));
+        setProducts(list);
+        setProductRows(list);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     async function checkAccess() {
       try {
@@ -270,6 +387,9 @@ export default function SettingsPage() {
     loadSwipeOneFieldList();
     loadAiConfigs();
     loadR2Configs();
+    loadProducts();
+    loadCategories();
+    loadPredefinedInstruction();
     fetch("/api/users")
       .then((r) => r.json())
       .then((d) => setUsers(d.users || []))
@@ -282,6 +402,9 @@ export default function SettingsPage() {
     loadSwipeOneFieldList,
     loadAiConfigs,
     loadR2Configs,
+    loadProducts,
+    loadCategories,
+    loadPredefinedInstruction,
   ]);
 
   // --- SES Handlers ---
@@ -748,6 +871,243 @@ export default function SettingsPage() {
     }
   };
 
+  // --- Prompt Configuration Handlers ---
+
+  const handleSavePredefinedInstruction = async () => {
+    setSavingPredefinedInstruction(true);
+    try {
+      const res = await fetch("/api/app-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "predefinedInstruction", value: predefinedInstruction }),
+      });
+      if (res.ok) {
+        setPredefinedInstructionLoaded(predefinedInstruction);
+        toast.success("Predefined instruction saved");
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to save");
+      }
+    } catch {
+      toast.error("Failed to save predefined instruction");
+    } finally {
+      setSavingPredefinedInstruction(false);
+    }
+  };
+
+  // --- Campaign Category Handlers ---
+
+  const addCategoryRow = () => {
+    setCategoryRows((prev) => [...prev, { ...emptyCategory }]);
+  };
+
+  const removeCategoryRow = (index: number) => {
+    setCategoryRows((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const updateCategoryRow = <K extends keyof CampaignCategoryType>(
+    index: number,
+    field: K,
+    value: CampaignCategoryType[K]
+  ) => {
+    setCategoryRows((prev) =>
+      prev.map((row, i) => {
+        if (i !== index) return row;
+        const next = { ...row, [field]: value };
+        // Auto-fill the slug while the row is still new (no id yet).
+        // Once saved the slug is read-only, so this only runs for fresh rows.
+        if (field === "name" && !row.id) {
+          next.slug = slugifyName(String(value));
+        }
+        return next;
+      })
+    );
+  };
+
+  const handleSaveCategories = async () => {
+    for (const row of categoryRows) {
+      if (!row.name.trim()) {
+        toast.error("Category name is required for all rows");
+        return;
+      }
+    }
+    const seen = new Set<string>();
+    for (const row of categoryRows) {
+      const k = row.name.trim().toLowerCase();
+      if (seen.has(k)) {
+        toast.error(`Duplicate category name: "${row.name.trim()}"`);
+        return;
+      }
+      seen.add(k);
+    }
+
+    setSavingCategories(true);
+    try {
+      const originalById = new Map(
+        categories.filter((c) => c.id).map((c) => [c.id!, c])
+      );
+      const currentIds = new Set(categoryRows.filter((c) => c.id).map((c) => c.id!));
+
+      const toDelete = [...originalById.keys()].filter((id) => !currentIds.has(id));
+      const toCreate = categoryRows.filter((c) => !c.id);
+      const toUpdate = categoryRows.filter((c) => {
+        if (!c.id) return false;
+        const orig = originalById.get(c.id);
+        if (!orig) return false;
+        return (
+          orig.name !== c.name ||
+          orig.description !== c.description ||
+          orig.swipeOneTagOverride !== c.swipeOneTagOverride ||
+          orig.autoCheckOnUnsubscribe !== c.autoCheckOnUnsubscribe
+        );
+      });
+
+      const ops: Promise<Response>[] = [];
+      for (const id of toDelete) {
+        ops.push(fetch(`/api/campaign-categories/${id}`, { method: "DELETE" }));
+      }
+      for (const c of toCreate) {
+        ops.push(
+          fetch("/api/campaign-categories", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(c),
+          })
+        );
+      }
+      for (const c of toUpdate) {
+        ops.push(
+          fetch(`/api/campaign-categories/${c.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(c),
+          })
+        );
+      }
+
+      const results = await Promise.all(ops);
+      const failed = results.find((r) => !r.ok);
+      if (failed) {
+        const data = await failed.json().catch(() => ({}));
+        toast.error(data.error || "Failed to save some categories");
+      } else {
+        toast.success("Campaign categories saved");
+      }
+      await loadCategories();
+    } catch {
+      toast.error("Failed to save campaign categories");
+    } finally {
+      setSavingCategories(false);
+    }
+  };
+
+  // --- Product Handlers ---
+
+  const addProductRow = () => {
+    setProductRows((prev) => [...prev, { ...emptyProduct }]);
+  };
+
+  const removeProductRow = (index: number) => {
+    setProductRows((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const updateProductRow = (index: number, field: keyof ProductType, value: string) => {
+    setProductRows((prev) =>
+      prev.map((row, i) => {
+        if (i !== index) return row;
+        const next = { ...row, [field]: value };
+        if (field === "wpOrgSlug") {
+          const slug = value.trim();
+          const prevSlug = row.wpOrgSlug.trim();
+          const prevLanding = prevSlug ? `https://bplugins.com/products/${prevSlug}` : "";
+          const prevPricing = prevSlug ? `https://bplugins.com/products/${prevSlug}/pricing` : "";
+          const prevLogo = prevSlug ? `https://ps.w.org/${prevSlug}/assets/icon-128x128.png` : "";
+          const newLanding = slug ? `https://bplugins.com/products/${slug}` : "";
+          const newPricing = slug ? `https://bplugins.com/products/${slug}/pricing` : "";
+          const newLogo = slug ? `https://ps.w.org/${slug}/assets/icon-128x128.png` : "";
+
+          if (!row.landingPageUrl.trim() || row.landingPageUrl === prevLanding) {
+            next.landingPageUrl = newLanding;
+          }
+          if (!row.pricingPageUrl.trim() || row.pricingPageUrl === prevPricing) {
+            next.pricingPageUrl = newPricing;
+          }
+          if (!row.logoUrl.trim() || row.logoUrl === prevLogo) {
+            next.logoUrl = newLogo;
+          }
+        }
+        return next;
+      })
+    );
+  };
+
+  const handleSaveProducts = async () => {
+    for (const row of productRows) {
+      if (!row.name.trim()) {
+        toast.error("Product Name is required for all products");
+        return;
+      }
+    }
+
+    setSavingProducts(true);
+    try {
+      const originalById = new Map(products.filter((p) => p.id).map((p) => [p.id!, p]));
+      const currentIds = new Set(productRows.filter((p) => p.id).map((p) => p.id!));
+
+      const toDelete = [...originalById.keys()].filter((id) => !currentIds.has(id));
+      const toCreate = productRows.filter((p) => !p.id);
+      const toUpdate = productRows.filter((p) => {
+        if (!p.id) return false;
+        const orig = originalById.get(p.id);
+        if (!orig) return false;
+        return (
+          orig.name !== p.name ||
+          orig.logoUrl !== p.logoUrl ||
+          orig.wpOrgSlug !== p.wpOrgSlug ||
+          orig.landingPageUrl !== p.landingPageUrl ||
+          orig.pricingPageUrl !== p.pricingPageUrl
+        );
+      });
+
+      const ops: Promise<Response>[] = [];
+      for (const id of toDelete) {
+        ops.push(fetch(`/api/products/${id}`, { method: "DELETE" }));
+      }
+      for (const p of toCreate) {
+        ops.push(
+          fetch("/api/products", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(p),
+          })
+        );
+      }
+      for (const p of toUpdate) {
+        ops.push(
+          fetch(`/api/products/${p.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(p),
+          })
+        );
+      }
+
+      const results = await Promise.all(ops);
+      const failed = results.find((r) => !r.ok);
+      if (failed) {
+        const data = await failed.json().catch(() => ({}));
+        toast.error(data.error || "Failed to save some products");
+      } else {
+        toast.success("Product settings saved");
+      }
+      await loadProducts();
+    } catch {
+      toast.error("Failed to save product settings");
+    } finally {
+      setSavingProducts(false);
+    }
+  };
+
   // --- User Handlers ---
 
   const handleCreateUser = async () => {
@@ -816,14 +1176,261 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="ses">
+      <Tabs defaultValue="app">
         <TabsList>
+          <TabsTrigger value="app">App Settings</TabsTrigger>
           <TabsTrigger value="ses">SES Connections</TabsTrigger>
           <TabsTrigger value="swipeone">SwipeOne Connections</TabsTrigger>
           <TabsTrigger value="ai">AI Configuration</TabsTrigger>
           <TabsTrigger value="r2">Cloudflare R2</TabsTrigger>
           <TabsTrigger value="users">User Management</TabsTrigger>
         </TabsList>
+
+        {/* ===== APP SETTINGS TAB ===== */}
+        <TabsContent value="app" className="mt-6 space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Campaign Category</CardTitle>
+                  <CardDescription>
+                    Define campaign categories so recipients can unsubscribe from a specific
+                    category instead of every email. These categories appear on the
+                    unsubscribe page.
+                  </CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={addCategoryRow}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Category
+                  </Button>
+                  <Button onClick={handleSaveCategories} disabled={savingCategories}>
+                    {savingCategories ? "Saving..." : "Save Changes"}
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {categoryRows.length === 0 ? (
+                <p className="text-muted-foreground text-sm text-center py-8">
+                  No campaign categories yet. Click &quot;Add Category&quot; to get started.
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {categoryRows.map((row, index) => (
+                    <div
+                      key={row.id ?? `new-${index}`}
+                      className="border rounded-md p-4 space-y-3 bg-muted/20"
+                    >
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium">
+                          Category #{index + 1}
+                          {row.name ? ` — ${row.name}` : ""}
+                        </p>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Remove category"
+                          onClick={() => removeCategoryRow(index)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                      <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor={`category-name-${index}`}>
+                            Category Name <span className="text-destructive">*</span>
+                          </Label>
+                          <Input
+                            id={`category-name-${index}`}
+                            placeholder="e.g. Product Updates"
+                            value={row.name}
+                            onChange={(e) => updateCategoryRow(index, "name", e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`category-slug-${index}`}>
+                            Unchangeable unique readable id
+                          </Label>
+                          <Input
+                            id={`category-slug-${index}`}
+                            placeholder="auto-filled from name"
+                            value={row.slug}
+                            readOnly
+                            disabled
+                            className="font-mono text-xs"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            {row.id
+                              ? "Locked — readable id cannot be changed after the category is created."
+                              : "Auto-generated from the name. Saved with the category and cannot be changed later."}
+                          </p>
+                        </div>
+                        <div className="space-y-2 md:col-span-2">
+                          <Label htmlFor={`category-swipeone-tag-${index}`}>
+                            Overwrite SwipeOne Tag
+                          </Label>
+                          <Input
+                            id={`category-swipeone-tag-${index}`}
+                            placeholder="leave blank to use the readable id"
+                            value={row.swipeOneTagOverride}
+                            onChange={(e) =>
+                              updateCategoryRow(index, "swipeOneTagOverride", e.target.value)
+                            }
+                            className="font-mono text-xs"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            When set, this exact text is used as the tag pushed to SwipeOne
+                            instead of the readable id (
+                            <span className="font-mono">{row.slug || "auto-filled-from-name"}</span>
+                            ).
+                          </p>
+                        </div>
+                        <div className="space-y-2 md:col-span-2">
+                          <Label htmlFor={`category-description-${index}`}>
+                            Description
+                          </Label>
+                          <Input
+                            id={`category-description-${index}`}
+                            placeholder="What kind of emails belong here?"
+                            value={row.description}
+                            onChange={(e) =>
+                              updateCategoryRow(index, "description", e.target.value)
+                            }
+                          />
+                        </div>
+                      </div>
+                      <label className="flex items-start gap-2 cursor-pointer text-sm">
+                        <Checkbox
+                          checked={row.autoCheckOnUnsubscribe}
+                          onCheckedChange={(v) =>
+                            updateCategoryRow(index, "autoCheckOnUnsubscribe", !!v)
+                          }
+                          className="mt-0.5"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium leading-tight">
+                            Auto Check This Category In Unsubscribe Preference Page
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            When a recipient lands on the unsubscribe page, this category
+                            will be checked by default.
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Product Settings</CardTitle>
+                  <CardDescription>
+                    Configure product data for future use. Add one row per product.
+                  </CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={addProductRow}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Product
+                  </Button>
+                  <Button onClick={handleSaveProducts} disabled={savingProducts}>
+                    {savingProducts ? "Saving..." : "Save Changes"}
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {productRows.length === 0 ? (
+                <p className="text-muted-foreground text-sm text-center py-8">
+                  No products configured. Click &quot;Add Product&quot; to get started.
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {productRows.map((row, index) => (
+                    <div
+                      key={row.id ?? `new-${index}`}
+                      className="border rounded-md p-4 space-y-3 bg-muted/20"
+                    >
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium">
+                          Product #{index + 1}
+                          {row.name ? ` — ${row.name}` : ""}
+                        </p>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Remove product"
+                          onClick={() => removeProductRow(index)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                      <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor={`product-name-${index}`}>
+                            Product Name <span className="text-destructive">*</span>
+                          </Label>
+                          <Input
+                            id={`product-name-${index}`}
+                            placeholder="e.g. WP Mail SMTP"
+                            value={row.name}
+                            onChange={(e) => updateProductRow(index, "name", e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`product-slug-${index}`}>Wp.org Slug</Label>
+                          <Input
+                            id={`product-slug-${index}`}
+                            placeholder="e.g. wp-mail-smtp"
+                            value={row.wpOrgSlug}
+                            onChange={(e) => updateProductRow(index, "wpOrgSlug", e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`product-logo-${index}`}>Product Logo URL</Label>
+                          <Input
+                            id={`product-logo-${index}`}
+                            placeholder="https://ps.w.org/{slug}/assets/icon-128x128.png"
+                            value={row.logoUrl}
+                            onChange={(e) => updateProductRow(index, "logoUrl", e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`product-landing-${index}`}>Landing Page URL</Label>
+                          <Input
+                            id={`product-landing-${index}`}
+                            placeholder="https://example.com"
+                            value={row.landingPageUrl}
+                            onChange={(e) =>
+                              updateProductRow(index, "landingPageUrl", e.target.value)
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2 md:col-span-2">
+                          <Label htmlFor={`product-pricing-${index}`}>Pricing Page URL</Label>
+                          <Input
+                            id={`product-pricing-${index}`}
+                            placeholder="https://example.com/pricing"
+                            value={row.pricingPageUrl}
+                            onChange={(e) =>
+                              updateProductRow(index, "pricingPageUrl", e.target.value)
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* ===== SES TAB ===== */}
         <TabsContent value="ses" className="mt-6">
@@ -1489,6 +2096,41 @@ export default function SettingsPage() {
               </div>
             </DialogContent>
           </Dialog>
+
+          {/* Prompt Configuration */}
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle>Prompt Configuration</CardTitle>
+              <CardDescription>
+                Settings that influence AI prompts across every email type.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="predefined-instruction">Predefined Instruction</Label>
+                <Textarea
+                  id="predefined-instruction"
+                  placeholder="e.g. Always address the reader by first name. Maintain a friendly, professional tone. Include brand colors #1a73e8 and #fbbc04."
+                  value={predefinedInstruction}
+                  onChange={(e) => setPredefinedInstruction(e.target.value)}
+                  rows={5}
+                />
+                <p className="text-xs text-muted-foreground">
+                  This text will prefill the &quot;Additional Instructions (optional)&quot; field
+                  for every AI email type (Regular, Product Feature Update, Product Security Update,
+                  Product Marketing Email).
+                </p>
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  onClick={handleSavePredefinedInstruction}
+                  disabled={savingPredefinedInstruction || predefinedInstruction === predefinedInstructionLoaded}
+                >
+                  {savingPredefinedInstruction ? "Saving..." : "Save Changes"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* ===== R2 TAB ===== */}
