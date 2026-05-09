@@ -39,7 +39,7 @@ interface User {
 const navLinks: { href: string; label: string; icon: typeof LayoutDashboard; exact?: boolean }[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/campaigns", label: "Campaigns", icon: Send },
-  { href: "/campaigns/swipeone/new", label: "SwipeOne Segment Only Campaign", icon: Globe, exact: true },
+  { href: "/campaigns/swipeone/new", label: "Create Campaign", icon: Globe, exact: true },
   { href: "/templates", label: "Templates", icon: FileText },
   { href: "/templates/dynamic", label: "Dynamic Templates", icon: Sparkles, exact: true },
 ];

@@ -2026,7 +2026,7 @@ ${productLogoUrl ? `- Display the product logo at the top of the email using: <i
             <ArrowLeft className="h-4 w-4" />
           </Link>
           <Globe className="h-5 w-5 text-muted-foreground" />
-          <h1 className="text-xl font-semibold">SwipeOne Segment Only Campaign</h1>
+          <h1 className="text-xl font-semibold">Create Campaign</h1>
         </div>
         <div className="flex items-center gap-2">
           {selectedSegments.length > 0 && (
