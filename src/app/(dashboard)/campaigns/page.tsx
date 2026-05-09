@@ -13,6 +13,7 @@ import {
   RefreshCw,
   CalendarClock,
   Copy,
+  Send,
 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -127,6 +128,7 @@ export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const [resumingId, setResumingId] = useState<string | null>(null);
 
   // Reschedule dialog
   const [rescheduleCampaign, setRescheduleCampaign] = useState<Campaign | null>(null);
@@ -267,6 +269,39 @@ export default function CampaignsPage() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to duplicate");
       setDuplicatingId(null);
+    }
+  };
+
+  const handleResumeSend = async (campaign: Campaign) => {
+    const remaining = Math.max(
+      0,
+      (campaign.totalRecipients || 0) - (campaign.totalSent || 0)
+    );
+    setResumingId(campaign.id);
+    try {
+      const res = await fetch(`/api/campaigns/${campaign.id}/send`, { method: "POST" });
+      if (res.ok) {
+        toast.success(
+          remaining > 0
+            ? `Resumed: sending to ~${remaining.toLocaleString()} pending recipient${remaining !== 1 ? "s" : ""}`
+            : "Send complete — no pending recipients"
+        );
+      } else {
+        // Network/timeout failures are common for large lists. The send is
+        // likely still progressing on the server — keep the user informed.
+        const data = await res.json().catch(() => ({}));
+        toast.warning(
+          data.error ||
+            "Send request returned an error. Check progress and retry if some recipients remain."
+        );
+      }
+    } catch {
+      toast.warning(
+        "Send request timed out. The send may still be running — wait a minute, then click again to send to anyone still pending."
+      );
+    } finally {
+      setResumingId(null);
+      fetchCampaigns();
     }
   };
 
@@ -413,6 +448,49 @@ export default function CampaignsPage() {
                             </Button>
                           </>
                         )}
+                        {(campaign.status === "sent" ||
+                          campaign.status === "sending" ||
+                          campaign.status === "failed") &&
+                          (campaign.totalSent || 0) < (campaign.totalRecipients || 0) && (
+                            <AlertDialog>
+                              <AlertDialogTrigger
+                                render={
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    title="Send to failed / pending contacts"
+                                    disabled={resumingId === campaign.id}
+                                  >
+                                    {resumingId === campaign.id ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Send className="h-4 w-4 text-blue-600" />
+                                    )}
+                                  </Button>
+                                }
+                              />
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Send to failed / pending contacts?</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    {(() => {
+                                      const remaining = Math.max(
+                                        0,
+                                        (campaign.totalRecipients || 0) - (campaign.totalSent || 0)
+                                      );
+                                      return `${remaining.toLocaleString()} recipient${remaining !== 1 ? "s have" : " has"} not received "${campaign.name}". Recipients who already received it successfully will be skipped automatically.`;
+                                    })()}
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => handleResumeSend(campaign)}>
+                                    Send to Pending
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          )}
                         {(campaign.status === "sent" || campaign.status === "scheduled") && (
                           <Button
                             variant="ghost"

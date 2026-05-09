@@ -191,22 +191,16 @@ export async function sendBulkEmails(
 
     if (result.messageId) {
       sent++;
-      // Record sent event
+      // Record sent event. We deliberately do NOT write a "delivered" event
+      // here — SES accepting the SendEmailCommand only means it was queued for
+      // sending; the email can still bounce. The SNS Delivery notification is
+      // the single source of truth for "delivered".
       await prisma.campaignEvent.create({
         data: {
           campaignId,
           email: email.to,
           eventType: "sent",
           metadata: JSON.stringify({ messageId: result.messageId }),
-        },
-      });
-      // SES accepted the email — mark as delivered
-      await prisma.campaignEvent.create({
-        data: {
-          campaignId,
-          email: email.to,
-          eventType: "delivered",
-          metadata: JSON.stringify({ messageId: result.messageId, timestamp: new Date().toISOString() }),
         },
       });
     } else {

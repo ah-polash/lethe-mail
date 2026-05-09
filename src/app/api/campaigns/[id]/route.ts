@@ -30,10 +30,36 @@ export async function GET(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Count events by type
+    // Count events by type. For headline-metric event types (delivered /
+    // opened / clicked / bounced / complained / unsubscribed) we count
+    // DISTINCT emails — repeat opens, repeat clicks, redundant SNS
+    // notifications, and historical double-writes from earlier code paths
+    // would otherwise inflate the rates above 100%. For "sent" / "failed" we
+    // still count raw events (each represents a distinct send attempt).
+    const UNIQUE_RECIPIENT_TYPES = new Set([
+      "delivered",
+      "opened",
+      "clicked",
+      "bounced",
+      "complained",
+      "unsubscribed",
+    ]);
     const eventCounts: Record<string, number> = {};
+    const seenPerType = new Map<string, Set<string>>();
     for (const event of campaign.events) {
-      eventCounts[event.eventType] = (eventCounts[event.eventType] || 0) + 1;
+      if (UNIQUE_RECIPIENT_TYPES.has(event.eventType)) {
+        let seen = seenPerType.get(event.eventType);
+        if (!seen) {
+          seen = new Set();
+          seenPerType.set(event.eventType, seen);
+        }
+        if (!seen.has(event.email)) {
+          seen.add(event.email);
+          eventCounts[event.eventType] = (eventCounts[event.eventType] || 0) + 1;
+        }
+      } else {
+        eventCounts[event.eventType] = (eventCounts[event.eventType] || 0) + 1;
+      }
     }
 
     // Include failed/bounced/complained events with full details for the log

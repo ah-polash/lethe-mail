@@ -1905,9 +1905,11 @@ ${productLogoUrl ? `- Display the product logo at the top of the email using: <i
     setSending(true);
     setSendProgress(null);
     let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let campaignId: string | null = null;
     try {
-      const id = await persistCampaign();
-      if (!id) return;
+      campaignId = await persistCampaign();
+      if (!campaignId) return;
+      const id = campaignId;
 
       // Start polling progress immediately. The /progress endpoint reads
       // campaign.totalRecipients (set early in the send route) and counts
@@ -1934,11 +1936,25 @@ ${productLogoUrl ? `- Display the product logo at the top of the email using: <i
       pollProgress();
       pollTimer = setInterval(pollProgress, 1500);
 
-      const res = await fetch(`/api/campaigns/${id}/send`, { method: "POST" });
-      // Final progress read so the bar reflects the post-send total.
+      let sendError: unknown = null;
+      let res: Response | null = null;
+      try {
+        res = await fetch(`/api/campaigns/${id}/send`, { method: "POST" });
+      } catch (err) {
+        // Network error / serverless timeout. The bulk send may still be
+        // running on the server — don't lie to the user that it failed.
+        sendError = err;
+      }
+      // Final progress read so the bar reflects whatever was sent.
       await pollProgress();
 
-      if (res.ok) {
+      if (sendError || !res) {
+        toast.warning(
+          "Send request timed out, but emails may still be going out. Use 'Send to Failed/Pending' on the Campaigns list to resume after it finishes.",
+          { duration: 8000 }
+        );
+        router.push(`/campaigns/swipeone/${id}`);
+      } else if (res.ok) {
         toast.success("Campaign is being sent!");
         router.push(`/campaigns/swipeone/${id}`);
       } else {

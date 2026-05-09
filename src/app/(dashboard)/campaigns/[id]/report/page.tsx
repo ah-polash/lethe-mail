@@ -132,16 +132,21 @@ export default function CampaignReportPage() {
     );
   }
 
-  // Merge stored counters with live eventCounts (prefer whichever is higher)
+  // Headline metrics are computed from distinct-recipient event counts in the
+  // GET endpoint (see eventCounts comment there). The stored campaign counters
+  // can be inflated on older campaigns (legacy double-counting from when both
+  // internal trackers and SES SNS wrote events without dedup), so we trust
+  // eventCounts for unique-recipient metrics. For "sent" we still take the
+  // stored counter as the canonical sent count.
   const ec = campaign.eventCounts || {};
   const stats = {
-    sent: Math.max(campaign.totalSent, ec["sent"] || 0),
-    delivered: Math.max(campaign.totalDelivered, ec["delivered"] || 0),
-    opened: Math.max(campaign.totalOpened, ec["opened"] || 0),
-    clicked: Math.max(campaign.totalClicked, ec["clicked"] || 0),
-    bounced: Math.max(campaign.totalBounced, ec["bounced"] || 0),
-    complaints: Math.max(campaign.totalComplaints, ec["complained"] || 0),
-    unsubscribed: Math.max(campaign.totalUnsubscribed, ec["unsubscribed"] || 0),
+    sent: campaign.totalSent || ec["sent"] || 0,
+    delivered: ec["delivered"] || 0,
+    opened: ec["opened"] || 0,
+    clicked: ec["clicked"] || 0,
+    bounced: ec["bounced"] || 0,
+    complaints: ec["complained"] || 0,
+    unsubscribed: ec["unsubscribed"] || 0,
   };
 
   const total = stats.sent || 1;

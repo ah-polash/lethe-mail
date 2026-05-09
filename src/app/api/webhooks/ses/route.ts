@@ -191,7 +191,22 @@ export async function POST(request: NextRequest) {
 
     const mappedEventType = eventTypeMap[eventType];
 
-    // Create event record
+    // Decide whether this is the FIRST time we're recording this event-type
+    // for this (campaign, recipient). Headline counters (delivered/opened/
+    // clicked/bounced/complained) should only ever be incremented once per
+    // unique recipient — otherwise repeat opens, repeat clicks, redundant SNS
+    // redeliveries, or both internal+SES tracking on the same action lead to
+    // inflated rates (eg open-rate > 100%, click-rate > open-rate).
+    const priorSameTypeEvent = await prisma.campaignEvent.findFirst({
+      where: {
+        campaignId,
+        email,
+        eventType: mappedEventType,
+      },
+      select: { id: true },
+    });
+
+    // Always insert the event row — keeps a full audit trail / link analytics.
     await prisma.campaignEvent.create({
       data: {
         campaignId,
@@ -201,23 +216,25 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Update campaign counters
-    const counterMap: Record<string, string> = {
-      delivered: "totalDelivered",
-      opened: "totalOpened",
-      clicked: "totalClicked",
-      bounced: "totalBounced",
-      complained: "totalComplaints",
-    };
+    // Increment the headline counter only on the FIRST event of this type.
+    if (!priorSameTypeEvent) {
+      const counterMap: Record<string, string> = {
+        delivered: "totalDelivered",
+        opened: "totalOpened",
+        clicked: "totalClicked",
+        bounced: "totalBounced",
+        complained: "totalComplaints",
+      };
 
-    const counterField = counterMap[mappedEventType];
-    if (counterField) {
-      await prisma.campaign.update({
-        where: { id: campaignId },
-        data: {
-          [counterField]: { increment: 1 },
-        },
-      });
+      const counterField = counterMap[mappedEventType];
+      if (counterField) {
+        await prisma.campaign.update({
+          where: { id: campaignId },
+          data: {
+            [counterField]: { increment: 1 },
+          },
+        });
+      }
     }
 
     // Look up campaign to determine audience source

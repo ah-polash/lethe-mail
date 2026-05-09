@@ -18,9 +18,14 @@ export async function POST(
       return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
     }
 
-    if (campaign.status !== "draft" && campaign.status !== "scheduled") {
+    // Allow re-running on draft/scheduled (initial send) AND on
+    // sending/sent/failed (idempotent resume — only emails without a successful
+    // "sent" event are re-attempted). This is what powers "Send to Failed
+    // Contacts" and recovery from serverless timeouts mid-bulk-send.
+    const RESUMABLE_STATUSES = new Set(["draft", "scheduled", "sending", "sent", "failed"]);
+    if (!RESUMABLE_STATUSES.has(campaign.status)) {
       return NextResponse.json(
-        { error: "Campaign has already been sent or is currently sending" },
+        { error: `Campaign cannot be sent from status "${campaign.status}"` },
         { status: 400 }
       );
     }
@@ -167,8 +172,22 @@ export async function POST(
       for (const row of categoryOptOuts) suppressedEmails.add(row.email);
     }
 
-    // Filter out suppressed recipients
-    const eligibleEmails = recipientEmails.filter((e) => !suppressedEmails.has(e));
+    // Find recipients who already received this campaign successfully so a
+    // resumed send (after a timeout / partial failure) doesn't double-deliver.
+    const alreadySentEvents = await prisma.campaignEvent.findMany({
+      where: {
+        campaignId: id,
+        eventType: "sent",
+        email: { in: recipientEmails },
+      },
+      select: { email: true },
+    });
+    const alreadySentEmails = new Set(alreadySentEvents.map((e) => e.email));
+
+    // Filter out suppressed recipients AND ones we've already successfully sent to
+    const eligibleEmails = recipientEmails.filter(
+      (e) => !suppressedEmails.has(e) && !alreadySentEmails.has(e)
+    );
     const skippedCount = recipientEmails.length - eligibleEmails.length;
 
     // Set totalRecipients now so the /progress endpoint can compute the denominator
@@ -179,6 +198,29 @@ export async function POST(
     });
 
     if (eligibleEmails.length === 0) {
+      // If everyone has already been sent, mark complete and report success.
+      if (alreadySentEmails.size > 0 && alreadySentEmails.size >= recipientEmails.length - suppressedEmails.size) {
+        const updated = await prisma.campaign.update({
+          where: { id },
+          data: {
+            status: "sent",
+            sentAt: campaign.sentAt ?? new Date(),
+            totalSent: alreadySentEmails.size,
+            totalRecipients: recipientEmails.length,
+          },
+        });
+        return NextResponse.json({
+          campaign: updated,
+          result: {
+            sent: 0,
+            failed: 0,
+            skipped: skippedCount,
+            alreadySent: alreadySentEmails.size,
+            errors: [] as string[],
+          },
+          message: "All eligible recipients already received this campaign.",
+        });
+      }
       await prisma.campaign.update({
         where: { id },
         data: { status: "sent", sentAt: new Date(), totalSent: 0, totalRecipients: recipientEmails.length },
@@ -242,8 +284,9 @@ export async function POST(
 
     const result = await sendBulkEmails(emails, id);
 
-    // If all emails failed, mark campaign as failed with error details
-    if (result.sent === 0 && result.failed > 0) {
+    // If everyone we tried this round failed AND we've never successfully
+    // sent any in prior rounds, the whole campaign is failed.
+    if (result.sent === 0 && result.failed > 0 && alreadySentEmails.size === 0) {
       const updated = await prisma.campaign.update({
         where: { id },
         data: {
@@ -262,15 +305,17 @@ export async function POST(
       }, { status: 422 });
     }
 
-    // Update campaign with results
+    // Update campaign with cumulative results (this resume + any prior sends).
+    // totalDelivered is intentionally NOT touched here — it's incremented by
+    // the SNS Delivery webhook handler as real deliveries are confirmed.
+    const totalSentCumulative = alreadySentEmails.size + result.sent;
     const updated = await prisma.campaign.update({
       where: { id },
       data: {
         totalRecipients: recipientEmails.length,
-        totalSent: result.sent,
-        totalDelivered: result.sent, // SES accepted = delivered
+        totalSent: totalSentCumulative,
         status: "sent",
-        sentAt: new Date(),
+        sentAt: campaign.sentAt ?? new Date(),
       },
     });
 
