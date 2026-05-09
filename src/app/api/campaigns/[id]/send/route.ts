@@ -171,6 +171,13 @@ export async function POST(
     const eligibleEmails = recipientEmails.filter((e) => !suppressedEmails.has(e));
     const skippedCount = recipientEmails.length - eligibleEmails.length;
 
+    // Set totalRecipients now so the /progress endpoint can compute the denominator
+    // while the bulk send is still in flight.
+    await prisma.campaign.update({
+      where: { id },
+      data: { totalRecipients: recipientEmails.length },
+    });
+
     if (eligibleEmails.length === 0) {
       await prisma.campaign.update({
         where: { id },

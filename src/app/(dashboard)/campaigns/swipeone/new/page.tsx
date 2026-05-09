@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Progress } from "@/components/ui/progress";
 import {
   Dialog,
   DialogContent,
@@ -61,6 +62,7 @@ import {
   Columns3,
   Columns4,
   Grid3x3,
+  Send,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -156,6 +158,17 @@ export function SwipeOneCampaignEditor({
   const [saving, setSaving] = useState(false);
   const [scheduling, setScheduling] = useState(false);
   const [sending, setSending] = useState(false);
+  const [sendProgress, setSendProgress] = useState<{
+    sent: number;
+    failed: number;
+    total: number;
+  } | null>(null);
+
+  // Send Preview dialog
+  const [previewSendOpen, setPreviewSendOpen] = useState(false);
+  const [previewSendEmail, setPreviewSendEmail] = useState("");
+  const [previewSendVarValues, setPreviewSendVarValues] = useState<Record<string, string>>({});
+  const [sendingPreview, setSendingPreview] = useState(false);
 
   // Details
   const [name, setName] = useState("");
@@ -1890,10 +1903,41 @@ ${productLogoUrl ? `- Display the product logo at the top of the email using: <i
   const handleSendNow = async () => {
     if (!validateForSend()) return;
     setSending(true);
+    setSendProgress(null);
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
     try {
       const id = await persistCampaign();
       if (!id) return;
+
+      // Start polling progress immediately. The /progress endpoint reads
+      // campaign.totalRecipients (set early in the send route) and counts
+      // sent/failed CampaignEvent rows written by the bulk send loop.
+      const pollProgress = async () => {
+        try {
+          const r = await fetch(`/api/campaigns/${id}/progress`);
+          if (!r.ok) return;
+          const p = (await r.json()) as {
+            sent?: number;
+            failed?: number;
+            total?: number | null;
+            status?: string;
+          };
+          setSendProgress({
+            sent: p.sent ?? 0,
+            failed: p.failed ?? 0,
+            total: p.total ?? 0,
+          });
+        } catch {
+          // ignore polling errors
+        }
+      };
+      pollProgress();
+      pollTimer = setInterval(pollProgress, 1500);
+
       const res = await fetch(`/api/campaigns/${id}/send`, { method: "POST" });
+      // Final progress read so the bar reflects the post-send total.
+      await pollProgress();
+
       if (res.ok) {
         toast.success("Campaign is being sent!");
         router.push(`/campaigns/swipeone/${id}`);
@@ -1902,7 +1946,71 @@ ${productLogoUrl ? `- Display the product logo at the top of the email using: <i
         toast.error(data.error || "Failed to send campaign");
       }
     } finally {
+      if (pollTimer) clearInterval(pollTimer);
       setSending(false);
+      setSendProgress(null);
+    }
+  };
+
+  const openPreviewSend = () => {
+    if (!htmlContent.trim()) {
+      toast.error("Email content is empty");
+      return;
+    }
+    if (!fromEmail) {
+      toast.error("Set a sender email first");
+      return;
+    }
+    // Pre-fill any vars from existing varValues, otherwise sensible defaults.
+    const next: Record<string, string> = {};
+    for (const v of detectedVars) {
+      if (varValues[v]) {
+        next[v] = varValues[v];
+        continue;
+      }
+      const lc = v.toLowerCase();
+      next[v] =
+        lc === "email" ? "jane@example.com" :
+        lc === "firstname" || lc === "first_name" ? "Jane" :
+        lc === "lastname" || lc === "last_name" ? "Doe" :
+        lc === "fullname" || lc === "full_name" ? "Jane Doe" :
+        "";
+    }
+    setPreviewSendVarValues(next);
+    setPreviewSendOpen(true);
+  };
+
+  const submitPreviewSend = async () => {
+    const to = previewSendEmail.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+      toast.error("Enter a valid recipient email");
+      return;
+    }
+    setSendingPreview(true);
+    try {
+      const res = await fetch("/api/campaigns/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to,
+          subject,
+          htmlContent,
+          fromEmail,
+          fromName,
+          varValues: previewSendVarValues,
+        }),
+      });
+      if (res.ok) {
+        toast.success(`Preview sent to ${to}`);
+        setPreviewSendOpen(false);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to send preview");
+      }
+    } catch {
+      toast.error("Failed to send preview");
+    } finally {
+      setSendingPreview(false);
     }
   };
 
@@ -4357,6 +4465,91 @@ ${productLogoUrl ? `- Display the product logo at the top of the email using: <i
             </DialogContent>
           </Dialog>
 
+          {/* Send Preview dialog */}
+          <Dialog open={previewSendOpen} onOpenChange={setPreviewSendOpen}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Send Preview</DialogTitle>
+                <DialogDescription>
+                  Send a one-off copy of this email to a single address. Provide values for
+                  any {`{{variables}}`} so the rendered email reflects how it will look for
+                  a real recipient. The subject is prefixed with [Preview].
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Recipient email <span className="text-destructive">*</span></Label>
+                  <Input
+                    type="email"
+                    value={previewSendEmail}
+                    onChange={(e) => setPreviewSendEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className="h-9"
+                  />
+                </div>
+                {detectedVars.length > 0 && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">
+                      Variable values{" "}
+                      <span className="text-muted-foreground/70">
+                        ({detectedVars.length})
+                      </span>
+                    </Label>
+                    <ScrollArea className="max-h-[280px] border p-2">
+                      <div className="space-y-2 pr-2">
+                        {detectedVars.map((v) => (
+                          <div
+                            key={v}
+                            className="grid grid-cols-[140px_1fr] gap-2 items-center"
+                          >
+                            <Label className="text-xs font-mono truncate" title={v}>
+                              {`{{${v}}}`}
+                            </Label>
+                            <Input
+                              value={previewSendVarValues[v] ?? ""}
+                              onChange={(e) =>
+                                setPreviewSendVarValues((prev) => ({
+                                  ...prev,
+                                  [v]: e.target.value,
+                                }))
+                              }
+                              placeholder={`Sample value for ${v}`}
+                              className="h-8 text-sm"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPreviewSendOpen(false)}
+                  disabled={sendingPreview}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={submitPreviewSend}
+                  disabled={sendingPreview || !previewSendEmail.trim()}
+                >
+                  {sendingPreview ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <Send className="h-3.5 w-3.5 mr-1.5" />
+                  )}
+                  {sendingPreview ? "Sending..." : "Send Preview"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           {/* Smart Map Variables modal (big — 90vw) */}
           <Dialog open={mapVarsOpen} onOpenChange={setMapVarsOpen}>
             <DialogContent
@@ -5084,18 +5277,53 @@ ${productLogoUrl ? `- Display the product logo at the top of the email using: <i
 
       {/* Footer */}
       <div className="flex-shrink-0 flex items-center justify-end px-6 lg:px-8 py-3 border-t bg-background sticky bottom-0 z-20 gap-2">
+        {sending && sendProgress && sendProgress.total > 0 && (
+          <div className="flex-1 flex items-center gap-3 mr-2 min-w-0 max-w-md">
+            <Progress
+              value={Math.min(
+                100,
+                Math.round(
+                  ((sendProgress.sent + sendProgress.failed) /
+                    Math.max(sendProgress.total, 1)) *
+                    100
+                )
+              )}
+              className="flex-1 min-w-[120px]"
+            />
+            <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+              {sendProgress.sent + sendProgress.failed} / {sendProgress.total} sent
+              {sendProgress.failed > 0 && (
+                <span className="text-destructive ml-1">({sendProgress.failed} failed)</span>
+              )}
+            </span>
+          </div>
+        )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9"
+          onClick={openPreviewSend}
+          disabled={sending}
+        >
+          <Send className="h-3.5 w-3.5 mr-1.5" />
+          Send Preview
+        </Button>
         <Button
           variant="outline"
           size="sm"
           className="h-9"
           onClick={handleSaveDraft}
-          disabled={saving}
+          disabled={saving || sending}
         >
           {saving ? "Saving..." : "Save Draft"}
         </Button>
         {userRole === "super_admin" && (
           <Button size="sm" className="h-9" onClick={handleSendNow} disabled={sending}>
-            {sending ? "Sending..." : "Send Now"}
+            {sending
+              ? sendProgress && sendProgress.total > 0
+                ? `Sending ${sendProgress.sent + sendProgress.failed}/${sendProgress.total}...`
+                : "Sending..."
+              : "Send Now"}
           </Button>
         )}
       </div>

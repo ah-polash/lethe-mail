@@ -329,7 +329,12 @@ export default function CampaignsPage() {
                 {campaigns.map((campaign) => (
                   <TableRow key={campaign.id}>
                     <TableCell className="font-medium">
-                      {campaign.name}
+                      <Link
+                        href={`/campaigns/${campaign.id}/report`}
+                        className="hover:underline"
+                      >
+                        {campaign.name}
+                      </Link>
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-col items-start gap-1">
