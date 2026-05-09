@@ -33,6 +33,18 @@ export async function POST(
     const body = await request.json().catch(() => ({}));
     const { scheduledAt } = body;
 
+    // Chunk size: emails to process per request. Keeping each request well
+    // under the serverless timeout means the frontend (or "Send to
+    // Failed/Pending") can drive a large list to completion via repeated
+    // chunked calls. The route is idempotent — already-sent recipients are
+    // skipped automatically — so chunking is just rate-limiting the loop.
+    const requestedChunk = Number(body?.chunkSize);
+    const DEFAULT_CHUNK = 50;
+    const MAX_CHUNK = 200;
+    const chunkSize = Number.isFinite(requestedChunk) && requestedChunk > 0
+      ? Math.min(Math.floor(requestedChunk), MAX_CHUNK)
+      : DEFAULT_CHUNK;
+
     // Schedule for later
     if (scheduledAt) {
       const updated = await prisma.campaign.update({
@@ -267,7 +279,23 @@ export async function POST(
       return html + pixel;
     }
 
-    const emails = eligibleEmails.map((email) => {
+    // Process at most `chunkSize` emails per request so we stay safely under
+    // the serverless function timeout. Anyone past the chunk is left for the
+    // next call — the alreadySentEmails set picks them up correctly because
+    // the route is idempotent.
+    const chunkEmails = eligibleEmails.slice(0, chunkSize);
+    const remainingAfterChunk = eligibleEmails.length - chunkEmails.length;
+
+    // Mark status="sending" while we still have more to process so the list
+    // page shows the right state and the resume button stays available.
+    if (remainingAfterChunk > 0 && campaign.status !== "sending") {
+      await prisma.campaign.update({
+        where: { id },
+        data: { status: "sending" },
+      });
+    }
+
+    const emails = chunkEmails.map((email) => {
       const contactData = contactByEmail.get(email) || { email };
       let htmlBody = resolveMergeTags(campaign.htmlContent, contactData);
       htmlBody = wrapLinksForTracking(htmlBody, id, email);
@@ -300,22 +328,25 @@ export async function POST(
           sent: result.sent,
           failed: result.failed,
           errors: result.errors,
+          remaining: remainingAfterChunk,
+          done: false,
         },
         error: `All emails failed to send. ${result.errors[0] || ""}`,
       }, { status: 422 });
     }
 
-    // Update campaign with cumulative results (this resume + any prior sends).
-    // totalDelivered is intentionally NOT touched here — it's incremented by
-    // the SNS Delivery webhook handler as real deliveries are confirmed.
+    // Update cumulative totals. Only flip status to "sent" when there is
+    // nothing remaining for this campaign. Otherwise keep "sending" so the
+    // caller / list page knows to keep going.
     const totalSentCumulative = alreadySentEmails.size + result.sent;
+    const done = remainingAfterChunk === 0;
     const updated = await prisma.campaign.update({
       where: { id },
       data: {
         totalRecipients: recipientEmails.length,
         totalSent: totalSentCumulative,
-        status: "sent",
-        sentAt: campaign.sentAt ?? new Date(),
+        status: done ? "sent" : "sending",
+        sentAt: done ? (campaign.sentAt ?? new Date()) : campaign.sentAt,
       },
     });
 
@@ -326,6 +357,9 @@ export async function POST(
         failed: result.failed,
         skipped: skippedCount,
         errors: result.errors,
+        remaining: remainingAfterChunk,
+        done,
+        chunkSize,
       },
     });
   } catch (error) {

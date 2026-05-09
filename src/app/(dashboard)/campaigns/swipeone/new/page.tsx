@@ -1936,30 +1936,78 @@ ${productLogoUrl ? `- Display the product logo at the top of the email using: <i
       pollProgress();
       pollTimer = setInterval(pollProgress, 1500);
 
-      let sendError: unknown = null;
-      let res: Response | null = null;
-      try {
-        res = await fetch(`/api/campaigns/${id}/send`, { method: "POST" });
-      } catch (err) {
-        // Network error / serverless timeout. The bulk send may still be
-        // running on the server — don't lie to the user that it failed.
-        sendError = err;
+      // Drive the send via chunked requests. Each call processes up to
+      // chunkSize emails on the server (well under the serverless timeout),
+      // returns { remaining, done }, and we re-call until done. The route is
+      // idempotent — already-sent recipients are skipped automatically — so
+      // a chunk that times out can be retried safely on the next iteration.
+      const CHUNK_SIZE = 50;
+      const MAX_ITERATIONS = 500; // safety cap; up to 25k recipients
+      let lastError: string | null = null;
+      let lastTimedOut = false;
+      let allDone = false;
+
+      for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+        let res: Response | null = null;
+        try {
+          res = await fetch(`/api/campaigns/${id}/send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chunkSize: CHUNK_SIZE }),
+          });
+        } catch {
+          // Serverless timeout / network issue mid-chunk. The route is
+          // idempotent so the same recipients (minus what got through) will
+          // be retried on the next iteration.
+          lastTimedOut = true;
+          // brief pause before retrying so we don't hammer if it's a real outage
+          await new Promise((r) => setTimeout(r, 2000));
+          continue;
+        }
+
+        const data = (await res.json().catch(() => ({}))) as {
+          result?: { remaining?: number; done?: boolean };
+          error?: string;
+          message?: string;
+        };
+
+        if (!res.ok) {
+          lastError = data.error || `Send chunk failed (${res.status})`;
+          break;
+        }
+
+        lastTimedOut = false;
+        await pollProgress();
+
+        if (data.result?.done || data.message) {
+          allDone = true;
+          break;
+        }
+        if (typeof data.result?.remaining === "number" && data.result.remaining <= 0) {
+          allDone = true;
+          break;
+        }
       }
-      // Final progress read so the bar reflects whatever was sent.
+
       await pollProgress();
 
-      if (sendError || !res) {
+      if (allDone) {
+        toast.success("Campaign sent!");
+        router.push(`/campaigns/swipeone/${id}`);
+      } else if (lastError) {
+        toast.error(lastError);
+      } else if (lastTimedOut) {
         toast.warning(
-          "Send request timed out, but emails may still be going out. Use 'Send to Failed/Pending' on the Campaigns list to resume after it finishes.",
+          "Some chunks timed out. Use 'Send to Failed/Pending' on the Campaigns list to send to remaining recipients.",
           { duration: 8000 }
         );
         router.push(`/campaigns/swipeone/${id}`);
-      } else if (res.ok) {
-        toast.success("Campaign is being sent!");
-        router.push(`/campaigns/swipeone/${id}`);
       } else {
-        const data = await res.json().catch(() => ({}));
-        toast.error(data.error || "Failed to send campaign");
+        toast.warning(
+          "Send loop hit the safety cap. Use 'Send to Failed/Pending' on the Campaigns list to continue.",
+          { duration: 8000 }
+        );
+        router.push(`/campaigns/swipeone/${id}`);
       }
     } finally {
       if (pollTimer) clearInterval(pollTimer);

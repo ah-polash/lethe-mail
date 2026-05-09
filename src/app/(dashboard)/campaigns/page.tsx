@@ -278,27 +278,78 @@ export default function CampaignsPage() {
       (campaign.totalRecipients || 0) - (campaign.totalSent || 0)
     );
     setResumingId(campaign.id);
+
+    // Drive the send via chunked requests. Each /send call processes up to
+    // chunkSize emails (safely under the serverless timeout), returns
+    // { remaining, done }, and we loop until done. The route is idempotent —
+    // already-sent recipients are skipped — so a chunk that times out is
+    // safely retried on the next iteration.
+    const CHUNK_SIZE = 50;
+    const MAX_ITERATIONS = 500; // up to ~25k recipients
+
+    let lastError: string | null = null;
+    let lastTimedOut = false;
+    let allDone = false;
+    let totalSentThisRun = 0;
+
     try {
-      const res = await fetch(`/api/campaigns/${campaign.id}/send`, { method: "POST" });
-      if (res.ok) {
+      for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+        let res: Response | null = null;
+        try {
+          res = await fetch(`/api/campaigns/${campaign.id}/send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chunkSize: CHUNK_SIZE }),
+          });
+        } catch {
+          lastTimedOut = true;
+          await new Promise((r) => setTimeout(r, 2000));
+          continue;
+        }
+
+        const data = (await res.json().catch(() => ({}))) as {
+          result?: { sent?: number; remaining?: number; done?: boolean };
+          error?: string;
+          message?: string;
+        };
+
+        if (!res.ok) {
+          lastError = data.error || `Send chunk failed (${res.status})`;
+          break;
+        }
+
+        lastTimedOut = false;
+        totalSentThisRun += data.result?.sent || 0;
+
+        if (data.result?.done || data.message) {
+          allDone = true;
+          break;
+        }
+        if (typeof data.result?.remaining === "number" && data.result.remaining <= 0) {
+          allDone = true;
+          break;
+        }
+      }
+
+      if (allDone) {
         toast.success(
-          remaining > 0
-            ? `Resumed: sending to ~${remaining.toLocaleString()} pending recipient${remaining !== 1 ? "s" : ""}`
-            : "Send complete — no pending recipients"
+          totalSentThisRun > 0
+            ? `Resumed: sent to ${totalSentThisRun.toLocaleString()} additional recipient${totalSentThisRun !== 1 ? "s" : ""}`
+            : remaining === 0
+              ? "Send complete — no pending recipients"
+              : "Send complete"
+        );
+      } else if (lastError) {
+        toast.error(lastError);
+      } else if (lastTimedOut) {
+        toast.warning(
+          "Some chunks timed out. Click 'Send to Failed/Pending' again to continue with anyone still pending."
         );
       } else {
-        // Network/timeout failures are common for large lists. The send is
-        // likely still progressing on the server — keep the user informed.
-        const data = await res.json().catch(() => ({}));
         toast.warning(
-          data.error ||
-            "Send request returned an error. Check progress and retry if some recipients remain."
+          "Hit the safety cap. Click 'Send to Failed/Pending' again to continue."
         );
       }
-    } catch {
-      toast.warning(
-        "Send request timed out. The send may still be running — wait a minute, then click again to send to anyone still pending."
-      );
     } finally {
       setResumingId(null);
       fetchCampaigns();
