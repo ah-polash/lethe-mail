@@ -56,6 +56,7 @@ type ModeFilter =
   | "product-marketing"
   | "summer-sale"
   | "bfcm-sale"
+  | "mothers-day-sale"
   | "ceo-offer";
 type ColCount = 1 | 2 | 3 | 4 | 5;
 
@@ -66,6 +67,7 @@ const AI_MODE_LABELS: Record<string, string> = {
   "product-marketing": "Product Marketing",
   "summer-sale": "Summer Sale",
   "bfcm-sale": "BFCM Sale",
+  "mothers-day-sale": "Mother's Day Sale",
   "ceo-offer": "CEOs Offer",
 };
 
@@ -228,6 +230,7 @@ export default function DynamicTemplatesPage() {
             <SelectItem value="product-marketing">Product Marketing</SelectItem>
             <SelectItem value="summer-sale">Summer Sale</SelectItem>
             <SelectItem value="bfcm-sale">BFCM Sale</SelectItem>
+            <SelectItem value="mothers-day-sale">Mother&apos;s Day Sale</SelectItem>
             <SelectItem value="ceo-offer">CEOs Offer</SelectItem>
           </SelectContent>
         </Select>

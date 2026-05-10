@@ -41,6 +41,7 @@ import {
   Megaphone,
   BadgePercent,
   Tag,
+  Flower,
   Crown,
   History,
   Plus,
@@ -103,6 +104,7 @@ type AiPanel =
   | "product-marketing"
   | "summer-sale"
   | "bfcm-sale"
+  | "mothers-day-sale"
   | "ceo-offer";
 
 const AI_MODE_LABELS: Record<string, string> = {
@@ -112,6 +114,7 @@ const AI_MODE_LABELS: Record<string, string> = {
   "product-marketing": "Product Marketing",
   "summer-sale": "Summer Sale",
   "bfcm-sale": "BFCM Sale",
+  "mothers-day-sale": "Mother's Day Sale",
   "ceo-offer": "CEOs Offer",
 };
 
@@ -313,6 +316,17 @@ export function SwipeOneCampaignEditor({
   const [saleInstruction, setSaleInstruction] = useState("");
   const [selectedSaleProductId, setSelectedSaleProductId] = useState<string>("");
 
+  // Mother's Day sale fields
+  const [mdPrompts, setMdPrompts] = useState<SavedPrompt[]>([]);
+  const [mdPromptsLoading, setMdPromptsLoading] = useState(false);
+  const [mdPromptsOpen, setMdPromptsOpen] = useState(false);
+  const [mdPromoCode, setMdPromoCode] = useState("");
+  const [mdDiscountValue, setMdDiscountValue] = useState("");
+  const [mdEndDate, setMdEndDate] = useState("");
+  const [mdHeadline, setMdHeadline] = useState("");
+  const [mdInstruction, setMdInstruction] = useState("");
+  const [selectedMdProductId, setSelectedMdProductId] = useState<string>("");
+
   // BFCM sale fields
   const [bfcmPrompts, setBfcmPrompts] = useState<SavedPrompt[]>([]);
   const [bfcmPromptsLoading, setBfcmPromptsLoading] = useState(false);
@@ -356,6 +370,10 @@ export function SwipeOneCampaignEditor({
   const [saleResults, setSaleResults] = useState<DynamicTemplateRow[]>([]);
   const [saleResultsLoading, setSaleResultsLoading] = useState(false);
   const [saleResultsOpen, setSaleResultsOpen] = useState(false);
+
+  const [mdResults, setMdResults] = useState<DynamicTemplateRow[]>([]);
+  const [mdResultsLoading, setMdResultsLoading] = useState(false);
+  const [mdResultsOpen, setMdResultsOpen] = useState(false);
 
   const [bfcmResults, setBfcmResults] = useState<DynamicTemplateRow[]>([]);
   const [bfcmResultsLoading, setBfcmResultsLoading] = useState(false);
@@ -606,6 +624,7 @@ export function SwipeOneCampaignEditor({
         | "product-marketing"
         | "summer-sale"
         | "bfcm-sale"
+        | "mothers-day-sale"
         | "ceo-offer"
     ) => {
       if (mode === "true") setRegularPromptsLoading(true);
@@ -614,6 +633,7 @@ export function SwipeOneCampaignEditor({
       else if (mode === "product-marketing") setMarketingPromptsLoading(true);
       else if (mode === "summer-sale") setSalePromptsLoading(true);
       else if (mode === "bfcm-sale") setBfcmPromptsLoading(true);
+      else if (mode === "mothers-day-sale") setMdPromptsLoading(true);
       else setCeoPromptsLoading(true);
       try {
         const res = await fetch(`/api/ai-prompts?aiMode=${encodeURIComponent(mode)}`);
@@ -625,6 +645,7 @@ export function SwipeOneCampaignEditor({
           else if (mode === "product-marketing") setMarketingPrompts(data.prompts || []);
           else if (mode === "summer-sale") setSalePrompts(data.prompts || []);
           else if (mode === "bfcm-sale") setBfcmPrompts(data.prompts || []);
+          else if (mode === "mothers-day-sale") setMdPrompts(data.prompts || []);
           else setCeoPrompts(data.prompts || []);
         }
       } catch {
@@ -636,6 +657,7 @@ export function SwipeOneCampaignEditor({
         else if (mode === "product-marketing") setMarketingPromptsLoading(false);
         else if (mode === "summer-sale") setSalePromptsLoading(false);
         else if (mode === "bfcm-sale") setBfcmPromptsLoading(false);
+        else if (mode === "mothers-day-sale") setMdPromptsLoading(false);
         else setCeoPromptsLoading(false);
       }
     },
@@ -782,6 +804,27 @@ Only use these exact variable names. Place them where they make sense — at min
       if (instructionMatch) setBfcmInstruction(instructionMatch[1].trim());
       setAiPanel("bfcm-sale");
       setBfcmPromptsOpen(false);
+    } else if (p.aiMode === "mothers-day-sale") {
+      const productMatch = p.prompt.match(/Mother's Day sale email for "([^"]+)"/);
+      if (productMatch) setProductName(productMatch[1]);
+      const promoMatch = p.prompt.match(/Promo code:\s*"([^"]+)"/);
+      if (promoMatch) setMdPromoCode(promoMatch[1]);
+      const discountMatch = p.prompt.match(/Discount:\s*"([^"]+)"/);
+      if (discountMatch) setMdDiscountValue(discountMatch[1]);
+      const endDateMatch = p.prompt.match(/Sale ends:\s*"([^"]+)"/);
+      if (endDateMatch) setMdEndDate(endDateMatch[1]);
+      const headlineMatch = p.prompt.match(/Headline\/hook:\s*"([^"]+)"/);
+      if (headlineMatch) setMdHeadline(headlineMatch[1]);
+      const landingMatch = p.prompt.match(/Product landing page:\s*(\S+)/);
+      if (landingMatch) setLandingPageUrl(landingMatch[1]);
+      const pricingMatch = p.prompt.match(/Pricing page:\s*(\S+)/);
+      if (pricingMatch) setPricingPageUrl(pricingMatch[1]);
+      const logoMatch = p.prompt.match(/Product logo:\s*(\S+)/);
+      if (logoMatch) setProductLogoUrl(logoMatch[1]);
+      const instructionMatch = p.prompt.match(/Additional instructions:\s*([\s\S]+?)(?:\n\nRequirements:|$)/);
+      if (instructionMatch) setMdInstruction(instructionMatch[1].trim());
+      setAiPanel("mothers-day-sale");
+      setMdPromptsOpen(false);
     } else if (p.aiMode === "ceo-offer") {
       const productMatch = p.prompt.match(/CEOs Offer email for "([^"]+)"/);
       if (productMatch) setProductName(productMatch[1]);
@@ -940,6 +983,7 @@ Only use these exact variable names. Place them where they make sense — at min
     | "product-marketing"
     | "summer-sale"
     | "bfcm-sale"
+    | "mothers-day-sale"
     | "ceo-offer"
     | "true" =>
     aiPanel === "product-update"
@@ -952,9 +996,11 @@ Only use these exact variable names. Place them where they make sense — at min
             ? "summer-sale"
             : aiPanel === "bfcm-sale"
               ? "bfcm-sale"
-              : aiPanel === "ceo-offer"
-                ? "ceo-offer"
-                : "true";
+              : aiPanel === "mothers-day-sale"
+                ? "mothers-day-sale"
+                : aiPanel === "ceo-offer"
+                  ? "ceo-offer"
+                  : "true";
 
   const openSaveDynamic = () => {
     if (!htmlContent.trim()) {
@@ -1011,6 +1057,7 @@ Only use these exact variable names. Place them where they make sense — at min
         | "product-marketing"
         | "summer-sale"
         | "bfcm-sale"
+        | "mothers-day-sale"
         | "ceo-offer"
     ) => {
       if (mode === "true") setRegularResultsLoading(true);
@@ -1019,6 +1066,7 @@ Only use these exact variable names. Place them where they make sense — at min
       else if (mode === "product-marketing") setMarketingResultsLoading(true);
       else if (mode === "summer-sale") setSaleResultsLoading(true);
       else if (mode === "bfcm-sale") setBfcmResultsLoading(true);
+      else if (mode === "mothers-day-sale") setMdResultsLoading(true);
       else setCeoResultsLoading(true);
       try {
         const res = await fetch(`/api/dynamic-templates?aiMode=${encodeURIComponent(mode)}`);
@@ -1031,6 +1079,7 @@ Only use these exact variable names. Place them where they make sense — at min
           else if (mode === "product-marketing") setMarketingResults(list);
           else if (mode === "summer-sale") setSaleResults(list);
           else if (mode === "bfcm-sale") setBfcmResults(list);
+          else if (mode === "mothers-day-sale") setMdResults(list);
           else setCeoResults(list);
         }
       } catch {
@@ -1042,6 +1091,7 @@ Only use these exact variable names. Place them where they make sense — at min
         else if (mode === "product-marketing") setMarketingResultsLoading(false);
         else if (mode === "summer-sale") setSaleResultsLoading(false);
         else if (mode === "bfcm-sale") setBfcmResultsLoading(false);
+        else if (mode === "mothers-day-sale") setMdResultsLoading(false);
         else setCeoResultsLoading(false);
       }
     },
@@ -1389,6 +1439,65 @@ ${bfcmEndDate ? `- Reinforce strong urgency by clearly stating the sale ends ${b
         const data = await res.json();
         applyGenerated(data.html || "", data.subject, `${productName} BFCM Sale — ${bfcmPromoCode}`);
         toast.success("BFCM sale email generated!");
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to generate");
+      }
+    } catch {
+      toast.error("Failed to generate");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleGenerateMothersDaySale = async () => {
+    if (!productName) { toast.error("Product name is required"); return; }
+    if (!mdPromoCode) { toast.error("Promo code is required"); return; }
+    if (!mdDiscountValue) { toast.error("Discount is required"); return; }
+    if (!landingPageUrl) { toast.error("Landing page URL is required"); return; }
+    if (!pricingPageUrl) { toast.error("Pricing page URL is required"); return; }
+
+    setGenerating(true);
+    try {
+      const prompt = `Generate a Mother's Day sale email for "${productName}".
+
+Promo code: "${mdPromoCode}"
+Discount: "${mdDiscountValue}"${mdEndDate ? `\nSale ends: "${mdEndDate}"` : ""}
+${mdHeadline ? `Headline/hook: "${mdHeadline}"\n` : ""}Product landing page: ${landingPageUrl}
+Pricing page: ${pricingPageUrl}${productLogoUrl ? `\nProduct logo: ${productLogoUrl}` : ""}
+
+${mdInstruction ? `Additional instructions: ${mdInstruction}` : ""}
+
+Requirements:
+- This is a MOTHER'S DAY promotional email — design it to feel warm, heartfelt, celebratory, and gift-worthy
+- Use a soft, floral palette (blush pink, rose, dusty mauve, cream, sage green) with tasteful floral or heart accents — keep it elegant, not cutesy
+- Lead with a warm hero section: a heartfelt headline${mdHeadline ? ` (use "${mdHeadline}" or a refined version)` : " honoring moms and announcing the sale"}, a 1–2 sentence subheading framing the product as a thoughtful gift or self-care treat, and a primary CTA button
+- Display the promo code "${mdPromoCode}" prominently — render it inside a high-contrast, dashed-border code box that's easy to copy, with helper text such as "Use code at checkout"
+- Make the discount "${mdDiscountValue}" visually dominant after the headline
+${mdEndDate ? `- Reinforce gentle urgency by clearly stating the sale ends ${mdEndDate}; consider phrases like "Ends ${mdEndDate}" near the CTA` : "- Add gentle urgency wording (e.g. \"Limited time\") even without a fixed end date"}
+- Primary CTA button must link to ${landingPageUrl} with warm, action-oriented copy (e.g. "Treat mom today", "Claim your gift", "Shop the Mother's Day sale")
+- Add a secondary, lower-emphasis link to the pricing page ${pricingPageUrl} (e.g. "View pricing")
+- Frame the offer around honoring mothers, gifting, or self-care — keep tone sincere and inclusive (acknowledge that not every reader is a mom, but everyone has someone to celebrate)
+- Close with a final reminder of the promo code and end date${productLogoUrl ? `\n- Display the product logo at the top of the email using the provided URL: <img src="${productLogoUrl}" alt="${productName}" style="max-width:128px;height:auto;display:block;" />` : ""}
+- Use inline styles for email compatibility
+- Make it responsive and visually polished — this should feel like a tasteful seasonal campaign, not a flashy clearance blast${buildVariableHint()}`;
+
+      const res = await fetch("/api/templates/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          style: "marketing",
+          templateName: `${productName} Mother's Day Sale — ${mdPromoCode}`,
+          templateSubject: mdHeadline || `Mother's Day: ${mdDiscountValue} off ${productName} with ${mdPromoCode}`,
+          aiMode: "mothers-day-sale",
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        applyGenerated(data.html || "", data.subject, `${productName} Mother's Day Sale — ${mdPromoCode}`);
+        toast.success("Mother's Day sale email generated!");
       } else {
         const data = await res.json().catch(() => ({}));
         toast.error(data.error || "Failed to generate");
@@ -2227,6 +2336,20 @@ ${productLogoUrl ? `- Display the product logo at the top of the email using: <i
             >
               <Tag className="h-3.5 w-3.5 mr-1.5" />
               BFCM Sale With PromoCode
+            </Button>
+            <Button
+              type="button"
+              variant={aiPanel === "mothers-day-sale" ? "default" : "outline"}
+              size="sm"
+              className="h-8"
+              onClick={() => {
+                const next = aiPanel === "mothers-day-sale" ? "none" : "mothers-day-sale";
+                setAiPanel(next);
+                if (next === "mothers-day-sale" && mdPrompts.length === 0) fetchSavedPrompts("mothers-day-sale");
+              }}
+            >
+              <Flower className="h-3.5 w-3.5 mr-1.5" />
+              Mother&apos;s Day Sale Email With PromoCode
             </Button>
             <Button
               type="button"
@@ -3897,6 +4020,271 @@ ${productLogoUrl ? `- Display the product logo at the top of the email using: <i
                   <Tag className="mr-2 h-4 w-4" />
                 )}
                 {generating ? "Generating..." : "Generate BFCM sale email"}
+              </Button>
+            </div>
+          )}
+
+          {/* Mother's Day Sale With PromoCode AI panel */}
+          {aiPanel === "mothers-day-sale" && (
+            <div className="border p-3 space-y-3 bg-muted/20">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Flower className="h-4 w-4" />
+                  Mother&apos;s Day Sale With PromoCode — AI Generator
+                </div>
+                <div className="flex items-center gap-2">
+                  <Popover
+                    open={mdResultsOpen}
+                    onOpenChange={(open) => {
+                      setMdResultsOpen(open);
+                      if (open) fetchPreviousResults("mothers-day-sale");
+                    }}
+                  >
+                    <PopoverTrigger
+                      render={
+                        <Button variant="outline" size="sm" className="h-7 text-xs"
+                          title="Load a previously generated or saved template without spending tokens">
+                          <RotateCcw className="h-3 w-3 mr-1.5" />
+                          Use Previous Results
+                        </Button>
+                      }
+                    />
+                    <PopoverContent align="end" className="w-[460px] p-0">
+                      <div className="px-3 pt-3 pb-2">
+                        <p className="text-sm font-medium">Previous Results — Mother&apos;s Day Sale</p>
+                        <p className="text-xs text-muted-foreground">
+                          AI-generated and saved templates. Click one to load.
+                        </p>
+                      </div>
+                      <Separator />
+                      <ScrollArea className="max-h-[360px]">
+                        {mdResultsLoading ? (
+                          <div className="flex items-center justify-center py-8">
+                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : mdResults.length === 0 ? (
+                          <p className="text-sm text-muted-foreground text-center py-8">
+                            No saved results yet. Generate or save one first.
+                          </p>
+                        ) : (
+                          <div className="p-1">
+                            {mdResults.map((t) => (
+                              <button
+                                key={t.id}
+                                type="button"
+                                onClick={() => {
+                                  applyDynamicTemplate(t);
+                                  setMdResultsOpen(false);
+                                }}
+                                className="w-full text-left rounded-md px-3 py-2 hover:bg-accent transition-colors"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm font-medium truncate flex-1">{t.name}</p>
+                                  <Badge variant={t.source === "manual" ? "default" : "secondary"} className="text-[10px] px-1.5 py-0">
+                                    {t.source === "manual" ? "Saved" : "AI"}
+                                  </Badge>
+                                </div>
+                                {t.subject && (
+                                  <p className="text-[11px] text-muted-foreground truncate mt-0.5">{t.subject}</p>
+                                )}
+                                <p className="text-[10px] text-muted-foreground mt-0.5">
+                                  {new Date(t.createdAt).toLocaleString()}
+                                </p>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </ScrollArea>
+                    </PopoverContent>
+                  </Popover>
+                  <Popover
+                    open={mdPromptsOpen}
+                    onOpenChange={(open) => {
+                      setMdPromptsOpen(open);
+                      if (open && mdPrompts.length === 0) fetchSavedPrompts("mothers-day-sale");
+                    }}
+                  >
+                    <PopoverTrigger
+                      render={
+                        <Button variant="outline" size="sm" className="h-7 text-xs">
+                          <History className="h-3 w-3 mr-1.5" />
+                          Use Previous Prompts
+                        </Button>
+                      }
+                    />
+                    <PopoverContent align="end" className="w-[420px] p-0">
+                      <div className="px-3 pt-3 pb-2">
+                        <p className="text-sm font-medium">Previous Prompts — Mother&apos;s Day Sale</p>
+                        <p className="text-xs text-muted-foreground">Click a prompt to fill the form</p>
+                      </div>
+                      <Separator />
+                      <ScrollArea className="max-h-[360px]">
+                        {mdPromptsLoading ? (
+                          <div className="flex items-center justify-center py-8">
+                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : mdPrompts.length === 0 ? (
+                          <p className="text-sm text-muted-foreground text-center py-8">
+                            No previous prompts yet for Mother&apos;s Day Sale.
+                          </p>
+                        ) : (
+                          <div className="p-1">
+                            {mdPrompts.map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => applyPrompt(p)}
+                                className="w-full text-left rounded-md px-3 py-2.5 hover:bg-accent transition-colors"
+                              >
+                                <p className="text-sm line-clamp-2">{p.prompt}</p>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {new Date(p.createdAt).toLocaleDateString()}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </ScrollArea>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </div>
+
+              {productOptions.length > 0 && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Load From Listed Products</Label>
+                  <Select
+                    value={selectedMdProductId}
+                    onValueChange={(v) => {
+                      const id = v || "";
+                      setSelectedMdProductId(id);
+                      const p = productOptions.find((o) => o.id === id);
+                      if (p) {
+                        setProductName(p.name || "");
+                        setProductLogoUrl(p.logoUrl || "");
+                        setLandingPageUrl(p.landingPageUrl || "");
+                        setPricingPageUrl(p.pricingPageUrl || "");
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="h-9 w-full">
+                      <SelectValue placeholder="Select a product to autofill the fields below">
+                        {(value) => {
+                          const id = typeof value === "string" ? value : "";
+                          const p = productOptions.find((o) => o.id === id);
+                          return p
+                            ? p.name
+                            : "Select a product to autofill the fields below";
+                        }}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {productOptions.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Product Name <span className="text-destructive">*</span></Label>
+                  <Input
+                    placeholder="e.g. Acme App"
+                    value={productName}
+                    onChange={(e) => setProductName(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Headline / Hook</Label>
+                  <Input
+                    placeholder="e.g. Celebrate mom — save big!"
+                    value={mdHeadline}
+                    onChange={(e) => setMdHeadline(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Promo Code <span className="text-destructive">*</span></Label>
+                  <Input
+                    placeholder="e.g. MOM25"
+                    value={mdPromoCode}
+                    onChange={(e) => setMdPromoCode(e.target.value)}
+                    className="h-9 font-mono uppercase"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Discount <span className="text-destructive">*</span></Label>
+                  <Input
+                    placeholder="e.g. 25% off everything"
+                    value={mdDiscountValue}
+                    onChange={(e) => setMdDiscountValue(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Sale End Date</Label>
+                  <Input
+                    placeholder="e.g. May 12, 2026"
+                    value={mdEndDate}
+                    onChange={(e) => setMdEndDate(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Landing Page URL <span className="text-destructive">*</span></Label>
+                  <Input
+                    placeholder="https://example.com"
+                    value={landingPageUrl}
+                    onChange={(e) => setLandingPageUrl(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Pricing Page URL <span className="text-destructive">*</span></Label>
+                  <Input
+                    placeholder="https://example.com/pricing"
+                    value={pricingPageUrl}
+                    onChange={(e) => setPricingPageUrl(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5 md:col-span-2">
+                  <Label className="text-xs">Product Logo URL</Label>
+                  <Input
+                    placeholder="https://ps.w.org/{slug}/assets/icon-128x128.png"
+                    value={productLogoUrl}
+                    onChange={(e) => setProductLogoUrl(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Additional Instructions (optional)</Label>
+                <Textarea
+                  placeholder="Brand voice, audience, accent colors, additional offers..."
+                  value={mdInstruction}
+                  onChange={(e) => setMdInstruction(e.target.value)}
+                  rows={2}
+                />
+              </div>
+
+              <Button
+                onClick={handleGenerateMothersDaySale}
+                disabled={generating}
+                className="w-full"
+              >
+                {generating ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Flower className="mr-2 h-4 w-4" />
+                )}
+                {generating ? "Generating..." : "Generate Mother's Day sale email"}
               </Button>
             </div>
           )}
