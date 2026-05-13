@@ -1840,7 +1840,7 @@ export default function SettingsPage() {
                       onValueChange={(v) =>
                         setSesForm({
                           ...sesForm,
-                          defaultFromEmail: v === "__none__" ? "" : v,
+                          defaultFromEmail: !v || v === "__none__" ? "" : v,
                         })
                       }
                     >
@@ -2160,7 +2160,7 @@ export default function SettingsPage() {
                 <div>
                   <CardTitle>AI Configuration</CardTitle>
                   <CardDescription>
-                    Configure your AI provider for email template generation. Supports OpenRouter (access to 100+ models) and OpenAI.
+                    Configure your AI provider for email template generation. Supports OpenRouter (100+ models), OpenAI, and Anthropic (Claude).
                   </CardDescription>
                 </div>
                 <div className="flex gap-2">
@@ -2275,8 +2275,18 @@ export default function SettingsPage() {
                       value={aiForm.provider}
                       onValueChange={(v) => {
                         const provider = v || "openrouter";
-                        const baseUrl = provider === "openai" ? "https://api.openai.com/v1" : "https://openrouter.ai/api/v1";
-                        const model = provider === "openai" ? "gpt-4o-mini" : "google/gemini-2.0-flash-001";
+                        const baseUrl =
+                          provider === "anthropic"
+                            ? "https://api.anthropic.com/v1"
+                            : provider === "openai"
+                              ? "https://api.openai.com/v1"
+                              : "https://openrouter.ai/api/v1";
+                        const model =
+                          provider === "anthropic"
+                            ? "claude-sonnet-4-6"
+                            : provider === "openai"
+                              ? "gpt-4o-mini"
+                              : "google/gemini-2.0-flash-001";
                         setAiForm({ ...aiForm, provider, baseUrl, model });
                       }}
                     >
@@ -2286,6 +2296,7 @@ export default function SettingsPage() {
                       <SelectContent>
                         <SelectItem value="openrouter">OpenRouter</SelectItem>
                         <SelectItem value="openai">OpenAI</SelectItem>
+                        <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -2296,7 +2307,13 @@ export default function SettingsPage() {
                     <Input
                       id="ai-api-key"
                       type={showAiApiKey ? "text" : "password"}
-                      placeholder={aiForm.provider === "openai" ? "sk-..." : "sk-or-v1-..."}
+                      placeholder={
+                        aiForm.provider === "anthropic"
+                          ? "sk-ant-..."
+                          : aiForm.provider === "openai"
+                            ? "sk-..."
+                            : "sk-or-v1-..."
+                      }
                       value={aiForm.apiKey}
                       onChange={(e) => setAiForm({ ...aiForm, apiKey: e.target.value })}
                     />
@@ -2318,16 +2335,40 @@ export default function SettingsPage() {
                       </a>
                     </p>
                   )}
+                  {aiForm.provider === "anthropic" && (
+                    <p className="text-xs text-muted-foreground">
+                      Get your API key from{" "}
+                      <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                        console.anthropic.com
+                      </a>
+                    </p>
+                  )}
                 </div>
                 <div className="grid gap-4 grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="ai-model">Model</Label>
-                    <Input
-                      id="ai-model"
-                      placeholder={aiForm.provider === "openai" ? "gpt-4o-mini" : "google/gemini-2.0-flash-001"}
-                      value={aiForm.model}
-                      onChange={(e) => setAiForm({ ...aiForm, model: e.target.value })}
-                    />
+                    {aiForm.provider === "anthropic" ? (
+                      <Select
+                        value={aiForm.model}
+                        onValueChange={(v) => setAiForm({ ...aiForm, model: v || "claude-sonnet-4-6" })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a Claude model" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="claude-opus-4-7">Claude Opus 4.7 — most capable</SelectItem>
+                          <SelectItem value="claude-sonnet-4-6">Claude Sonnet 4.6 — recommended</SelectItem>
+                          <SelectItem value="claude-haiku-4-5-20251001">Claude Haiku 4.5 — fastest</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input
+                        id="ai-model"
+                        placeholder={aiForm.provider === "openai" ? "gpt-4o-mini" : "google/gemini-2.0-flash-001"}
+                        value={aiForm.model}
+                        onChange={(e) => setAiForm({ ...aiForm, model: e.target.value })}
+                      />
+                    )}
                     {aiForm.provider === "openrouter" && (
                       <p className="text-xs text-muted-foreground">
                         Browse models at{" "}
@@ -2336,12 +2377,26 @@ export default function SettingsPage() {
                         </a>
                       </p>
                     )}
+                    {aiForm.provider === "anthropic" && (
+                      <p className="text-xs text-muted-foreground">
+                        Browse all Claude models at{" "}
+                        <a href="https://docs.anthropic.com/en/docs/about-claude/models" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                          docs.anthropic.com
+                        </a>
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="ai-base-url">Base URL</Label>
                     <Input
                       id="ai-base-url"
-                      placeholder="https://openrouter.ai/api/v1"
+                      placeholder={
+                        aiForm.provider === "anthropic"
+                          ? "https://api.anthropic.com/v1"
+                          : aiForm.provider === "openai"
+                            ? "https://api.openai.com/v1"
+                            : "https://openrouter.ai/api/v1"
+                      }
                       value={aiForm.baseUrl}
                       onChange={(e) => setAiForm({ ...aiForm, baseUrl: e.target.value })}
                     />

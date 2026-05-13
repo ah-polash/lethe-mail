@@ -62,17 +62,38 @@ export async function PUT() {
       return NextResponse.json({ error: "No active AI configuration found" }, { status: 400 });
     }
 
-    const response = await fetch(`${active.baseUrl}/chat/completions`, {
+    const isAnthropic = active.provider === "anthropic";
+    // Trim trailing slash so `${baseUrl}/messages` doesn't become `…/v1//messages`.
+    const baseUrl = (active.baseUrl || "").replace(/\/+$/, "");
+
+    const url = isAnthropic
+      ? `${baseUrl}/messages`
+      : `${baseUrl}/chat/completions`;
+
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (isAnthropic) {
+      headers["x-api-key"] = active.apiKey;
+      headers["anthropic-version"] = "2023-06-01";
+    } else {
+      headers.Authorization = `Bearer ${active.apiKey}`;
+    }
+
+    const body = isAnthropic
+      ? {
+          model: active.model,
+          max_tokens: 10,
+          messages: [{ role: "user", content: "Say hello in one word." }],
+        }
+      : {
+          model: active.model,
+          messages: [{ role: "user", content: "Say hello in one word." }],
+          max_tokens: 10,
+        };
+
+    const response = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${active.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: active.model,
-        messages: [{ role: "user", content: "Say hello in one word." }],
-        max_tokens: 10,
-      }),
+      headers,
+      body: JSON.stringify(body),
     });
 
     if (response.ok) {
@@ -80,7 +101,7 @@ export async function PUT() {
     } else {
       const data = await response.json().catch(() => ({}));
       return NextResponse.json(
-        { success: false, error: data.error?.message || `API returned ${response.status}` },
+        { success: false, error: data.error?.message || data.error || `API returned ${response.status}` },
         { status: 400 }
       );
     }

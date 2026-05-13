@@ -43,6 +43,7 @@ import {
   Tag,
   Flower,
   Crown,
+  Boxes,
   History,
   Plus,
   Trash2,
@@ -105,7 +106,8 @@ type AiPanel =
   | "summer-sale"
   | "bfcm-sale"
   | "mothers-day-sale"
-  | "ceo-offer";
+  | "ceo-offer"
+  | "bundle-promotion";
 
 const AI_MODE_LABELS: Record<string, string> = {
   "true": "Regular",
@@ -116,6 +118,7 @@ const AI_MODE_LABELS: Record<string, string> = {
   "bfcm-sale": "BFCM Sale",
   "mothers-day-sale": "Mother's Day Sale",
   "ceo-offer": "CEOs Offer",
+  "bundle-promotion": "Bundle Promotion",
 };
 
 const aiModeLabel = (mode: string | null | undefined) =>
@@ -350,6 +353,16 @@ export function SwipeOneCampaignEditor({
   const [ceoInstruction, setCeoInstruction] = useState("");
   const [selectedCeoProductId, setSelectedCeoProductId] = useState<string>("");
 
+  // Bundle Promotion fields (bplugins plugin bundle for businesses)
+  const [bundlePrompts, setBundlePrompts] = useState<SavedPrompt[]>([]);
+  const [bundlePromptsLoading, setBundlePromptsLoading] = useState(false);
+  const [bundlePromptsOpen, setBundlePromptsOpen] = useState(false);
+  const [bundlePromoCode, setBundlePromoCode] = useState("");
+  const [bundleDiscountValue, setBundleDiscountValue] = useState("");
+  const [bundleEndDate, setBundleEndDate] = useState("");
+  const [bundleHeadline, setBundleHeadline] = useState("");
+  const [bundleInstruction, setBundleInstruction] = useState("");
+
   // Saved AI results / Dynamic Templates (per panel)
   const [regularResults, setRegularResults] = useState<DynamicTemplateRow[]>([]);
   const [regularResultsLoading, setRegularResultsLoading] = useState(false);
@@ -382,6 +395,10 @@ export function SwipeOneCampaignEditor({
   const [ceoResults, setCeoResults] = useState<DynamicTemplateRow[]>([]);
   const [ceoResultsLoading, setCeoResultsLoading] = useState(false);
   const [ceoResultsOpen, setCeoResultsOpen] = useState(false);
+
+  const [bundleResults, setBundleResults] = useState<DynamicTemplateRow[]>([]);
+  const [bundleResultsLoading, setBundleResultsLoading] = useState(false);
+  const [bundleResultsOpen, setBundleResultsOpen] = useState(false);
 
   // Save As Dynamic Template dialog
   const [saveDynamicOpen, setSaveDynamicOpen] = useState(false);
@@ -481,6 +498,7 @@ export function SwipeOneCampaignEditor({
         setBfcmInstruction((prev) => (prev ? prev : v));
         setMdInstruction((prev) => (prev ? prev : v));
         setCeoInstruction((prev) => (prev ? prev : v));
+        setBundleInstruction((prev) => (prev ? prev : v));
       }
     } catch {
       // optional
@@ -656,6 +674,7 @@ export function SwipeOneCampaignEditor({
         | "bfcm-sale"
         | "mothers-day-sale"
         | "ceo-offer"
+        | "bundle-promotion"
     ) => {
       if (mode === "true") setRegularPromptsLoading(true);
       else if (mode === "product-update") setProductPromptsLoading(true);
@@ -664,7 +683,8 @@ export function SwipeOneCampaignEditor({
       else if (mode === "summer-sale") setSalePromptsLoading(true);
       else if (mode === "bfcm-sale") setBfcmPromptsLoading(true);
       else if (mode === "mothers-day-sale") setMdPromptsLoading(true);
-      else setCeoPromptsLoading(true);
+      else if (mode === "ceo-offer") setCeoPromptsLoading(true);
+      else setBundlePromptsLoading(true);
       try {
         const res = await fetch(`/api/ai-prompts?aiMode=${encodeURIComponent(mode)}`);
         if (res.ok) {
@@ -676,7 +696,8 @@ export function SwipeOneCampaignEditor({
           else if (mode === "summer-sale") setSalePrompts(data.prompts || []);
           else if (mode === "bfcm-sale") setBfcmPrompts(data.prompts || []);
           else if (mode === "mothers-day-sale") setMdPrompts(data.prompts || []);
-          else setCeoPrompts(data.prompts || []);
+          else if (mode === "ceo-offer") setCeoPrompts(data.prompts || []);
+          else setBundlePrompts(data.prompts || []);
         }
       } catch {
         // ignore
@@ -688,7 +709,8 @@ export function SwipeOneCampaignEditor({
         else if (mode === "summer-sale") setSalePromptsLoading(false);
         else if (mode === "bfcm-sale") setBfcmPromptsLoading(false);
         else if (mode === "mothers-day-sale") setMdPromptsLoading(false);
-        else setCeoPromptsLoading(false);
+        else if (mode === "ceo-offer") setCeoPromptsLoading(false);
+        else setBundlePromptsLoading(false);
       }
     },
     []
@@ -855,6 +877,23 @@ Only use these exact variable names. Place them where they make sense — at min
       if (instructionMatch) setMdInstruction(instructionMatch[1].trim());
       setAiPanel("mothers-day-sale");
       setMdPromptsOpen(false);
+    } else if (p.aiMode === "bundle-promotion") {
+      const promoMatch = p.prompt.match(/Promo code:\s*"([^"]+)"/);
+      if (promoMatch) setBundlePromoCode(promoMatch[1]);
+      const discountMatch = p.prompt.match(/Discount:\s*"([^"]+)"/);
+      if (discountMatch) setBundleDiscountValue(discountMatch[1]);
+      const endDateMatch = p.prompt.match(/Sale ends:\s*"([^"]+)"/);
+      if (endDateMatch) setBundleEndDate(endDateMatch[1]);
+      const headlineMatch = p.prompt.match(/Headline\/hook:\s*"([^"]+)"/);
+      if (headlineMatch) setBundleHeadline(headlineMatch[1]);
+      const landingMatch = p.prompt.match(/Bundle landing page:\s*(\S+)/);
+      if (landingMatch) setLandingPageUrl(landingMatch[1]);
+      const logoMatch = p.prompt.match(/Bundle logo:\s*(\S+)/);
+      if (logoMatch) setProductLogoUrl(logoMatch[1]);
+      const instructionMatch = p.prompt.match(/Additional instructions:\s*([\s\S]+?)(?:\n\nRequirements:|$)/);
+      if (instructionMatch) setBundleInstruction(instructionMatch[1].trim());
+      setAiPanel("bundle-promotion");
+      setBundlePromptsOpen(false);
     } else if (p.aiMode === "ceo-offer") {
       const productMatch = p.prompt.match(/CEOs Offer email for "([^"]+)"/);
       if (productMatch) setProductName(productMatch[1]);
@@ -999,6 +1038,19 @@ Only use these exact variable names. Place them where they make sense — at min
     if (fallbackName && !name) setName(fallbackName);
   };
 
+  // Wraps the success toast for every AI generate call. If the API surfaced
+  // `aiError` it means the provider request failed and a deterministic fallback
+  // template was returned — show that to the user instead of a misleading "success".
+  const reportAiResult = (data: { aiError?: string | null }, successMsg: string) => {
+    if (data.aiError) {
+      toast.warning(`AI provider failed — fallback template used. ${data.aiError}`, {
+        duration: 8000,
+      });
+    } else {
+      toast.success(successMsg);
+    }
+  };
+
   // Apply a saved DynamicTemplate to the editor.
   const applyDynamicTemplate = (t: DynamicTemplateRow) => {
     applyGenerated(t.htmlContent, t.subject || undefined, t.name || undefined);
@@ -1015,6 +1067,7 @@ Only use these exact variable names. Place them where they make sense — at min
     | "bfcm-sale"
     | "mothers-day-sale"
     | "ceo-offer"
+    | "bundle-promotion"
     | "true" =>
     aiPanel === "product-update"
       ? "product-update"
@@ -1030,7 +1083,9 @@ Only use these exact variable names. Place them where they make sense — at min
                 ? "mothers-day-sale"
                 : aiPanel === "ceo-offer"
                   ? "ceo-offer"
-                  : "true";
+                  : aiPanel === "bundle-promotion"
+                    ? "bundle-promotion"
+                    : "true";
 
   const openSaveDynamic = () => {
     if (!htmlContent.trim()) {
@@ -1089,6 +1144,7 @@ Only use these exact variable names. Place them where they make sense — at min
         | "bfcm-sale"
         | "mothers-day-sale"
         | "ceo-offer"
+        | "bundle-promotion"
     ) => {
       if (mode === "true") setRegularResultsLoading(true);
       else if (mode === "product-update") setProductResultsLoading(true);
@@ -1097,7 +1153,8 @@ Only use these exact variable names. Place them where they make sense — at min
       else if (mode === "summer-sale") setSaleResultsLoading(true);
       else if (mode === "bfcm-sale") setBfcmResultsLoading(true);
       else if (mode === "mothers-day-sale") setMdResultsLoading(true);
-      else setCeoResultsLoading(true);
+      else if (mode === "ceo-offer") setCeoResultsLoading(true);
+      else setBundleResultsLoading(true);
       try {
         const res = await fetch(`/api/dynamic-templates?aiMode=${encodeURIComponent(mode)}`);
         if (res.ok) {
@@ -1110,7 +1167,8 @@ Only use these exact variable names. Place them where they make sense — at min
           else if (mode === "summer-sale") setSaleResults(list);
           else if (mode === "bfcm-sale") setBfcmResults(list);
           else if (mode === "mothers-day-sale") setMdResults(list);
-          else setCeoResults(list);
+          else if (mode === "ceo-offer") setCeoResults(list);
+          else setBundleResults(list);
         }
       } catch {
         // ignore
@@ -1122,7 +1180,8 @@ Only use these exact variable names. Place them where they make sense — at min
         else if (mode === "summer-sale") setSaleResultsLoading(false);
         else if (mode === "bfcm-sale") setBfcmResultsLoading(false);
         else if (mode === "mothers-day-sale") setMdResultsLoading(false);
-        else setCeoResultsLoading(false);
+        else if (mode === "ceo-offer") setCeoResultsLoading(false);
+        else setBundleResultsLoading(false);
       }
     },
     []
@@ -1149,7 +1208,7 @@ Only use these exact variable names. Place them where they make sense — at min
       if (res.ok) {
         const data = await res.json();
         applyGenerated(data.html || "", data.subject);
-        toast.success("Email generated! Review the HTML or switch to block editor.");
+        reportAiResult(data, "Email generated! Review the HTML or switch to block editor.");
       } else {
         const data = await res.json().catch(() => ({}));
         toast.error(data.error || "Failed to generate email");
@@ -1215,7 +1274,7 @@ Requirements:
       if (res.ok) {
         const data = await res.json();
         applyGenerated(data.html || "", data.subject, `${productName} v${versionNumber} Update`);
-        toast.success("Product update email generated!");
+        reportAiResult(data, "Product update email generated!");
       } else {
         const data = await res.json().catch(() => ({}));
         toast.error(data.error || "Failed to generate");
@@ -1282,7 +1341,7 @@ Requirements:
       if (res.ok) {
         const data = await res.json();
         applyGenerated(data.html || "", data.subject, `${productName} v${versionNumber} Security Update`);
-        toast.success("Product security update email generated!");
+        reportAiResult(data, "Product security update email generated!");
       } else {
         const data = await res.json().catch(() => ({}));
         toast.error(data.error || "Failed to generate");
@@ -1351,7 +1410,7 @@ Requirements:
       if (res.ok) {
         const data = await res.json();
         applyGenerated(data.html || "", data.subject, `${productName} Marketing Email`);
-        toast.success("Product marketing email generated!");
+        reportAiResult(data, "Product marketing email generated!");
       } else {
         const data = await res.json().catch(() => ({}));
         toast.error(data.error || "Failed to generate");
@@ -1409,7 +1468,7 @@ ${saleEndDate ? `- Reinforce urgency by clearly stating the sale ends ${saleEndD
       if (res.ok) {
         const data = await res.json();
         applyGenerated(data.html || "", data.subject, `${productName} Summer Sale — ${promoCode}`);
-        toast.success("Summer sale email generated!");
+        reportAiResult(data, "Summer sale email generated!");
       } else {
         const data = await res.json().catch(() => ({}));
         toast.error(data.error || "Failed to generate");
@@ -1468,7 +1527,7 @@ ${bfcmEndDate ? `- Reinforce strong urgency by clearly stating the sale ends ${b
       if (res.ok) {
         const data = await res.json();
         applyGenerated(data.html || "", data.subject, `${productName} BFCM Sale — ${bfcmPromoCode}`);
-        toast.success("BFCM sale email generated!");
+        reportAiResult(data, "BFCM sale email generated!");
       } else {
         const data = await res.json().catch(() => ({}));
         toast.error(data.error || "Failed to generate");
@@ -1526,7 +1585,7 @@ ${mdEndDate ? `- Reinforce urgency by clearly stating the sale ends ${mdEndDate}
       if (res.ok) {
         const data = await res.json();
         applyGenerated(data.html || "", data.subject, `${productName} Mother's Day Sale — ${mdPromoCode}`);
-        toast.success("Mother's Day sale email generated!");
+        reportAiResult(data, "Mother's Day sale email generated!");
       } else {
         const data = await res.json().catch(() => ({}));
         toast.error(data.error || "Failed to generate");
@@ -1587,7 +1646,63 @@ ${productLogoUrl ? `- Display the product logo at the top of the email using: <i
       if (res.ok) {
         const data = await res.json();
         applyGenerated(data.html || "", data.subject, `${productName} CEOs Offer — ${ceoPromoCode}`);
-        toast.success("CEOs Offer email generated!");
+        reportAiResult(data, "CEOs Offer email generated!");
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to generate");
+      }
+    } catch {
+      toast.error("Failed to generate");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleGenerateBundlePromotion = async () => {
+    if (!bundlePromoCode) { toast.error("Promo code is required"); return; }
+    if (!bundleDiscountValue) { toast.error("Discount is required"); return; }
+    if (!landingPageUrl) { toast.error("Bundle landing page URL is required"); return; }
+
+    setGenerating(true);
+    try {
+      const prompt = `Generate a Bundle Promotion email for the bPlugins Plugin Bundle.
+
+About the bundle: a single bundle that includes ALL bPlugins plugins, specifically designed for businesses (agencies, freelancers, and teams managing multiple WordPress sites). The bundle is significantly cheaper than buying plugins individually and unlocks every plugin for one price.
+
+Promo code: "${bundlePromoCode}"
+Discount: "${bundleDiscountValue}"${bundleEndDate ? `\nSale ends: "${bundleEndDate}"` : ""}
+${bundleHeadline ? `Headline/hook: "${bundleHeadline}"\n` : ""}Bundle landing page: ${landingPageUrl}${pricingPageUrl ? `\nPricing page: ${pricingPageUrl}` : ""}${productLogoUrl ? `\nBundle logo: ${productLogoUrl}` : ""}
+
+${bundleInstruction ? `Additional instructions: ${bundleInstruction}` : ""}
+
+Requirements:
+- Position this as the "everything in one bundle" deal — emphasize that businesses get ALL plugins for one price, not a single product
+- Audience is business owners, agencies, freelancers, and developers managing multiple WordPress sites — the tone should speak to ROI, time saved, and the value of having every plugin available
+- Lead with a strong hero section: bold headline${bundleHeadline ? ` (use "${bundleHeadline}" or a refined version)` : " announcing the plugin bundle promotion"}, a 1–2 sentence subheading that frames it as the bundle for businesses, and a primary CTA button
+- Include a short section that lists the bundle's value props for businesses (e.g. "Every plugin, one price", "Built for agencies and teams", "Use on unlimited business sites", "One license, every plugin we make") — 3–5 bullets or visual feature cards
+- Display the promo code "${bundlePromoCode}" prominently — render it inside a dashed-border code box that's easy to copy, with helper text such as "Use code at checkout"
+- Make the discount "${bundleDiscountValue}" visually clear and tied to the promo code${bundleEndDate ? `\n- Mention the deadline "${bundleEndDate}" with urgency (but don't be pushy)` : ""}
+- Primary CTA button must link to ${landingPageUrl} with action-oriented copy aimed at businesses (e.g. "Get the bundle", "Unlock every plugin", "Claim the business bundle")${pricingPageUrl ? `\n- Add a secondary, lower-emphasis link to ${pricingPageUrl} (e.g. "See full pricing")` : ""}
+- Use a professional, premium palette suited for a B2B audience (clean white / off-white, dark text, single confident accent color) — this is not a flashy consumer sale${productLogoUrl ? `\n- Display the bundle logo at the top using: <img src="${productLogoUrl}" alt="Plugin Bundle" style="max-width:128px;height:auto;display:block;" />` : ""}
+- Use inline styles for email compatibility
+- Make it responsive and visually polished — it should feel like a high-value business offer${buildVariableHint()}`;
+
+      const res = await fetch("/api/templates/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          style: "professional",
+          templateName: `Plugin Bundle Promotion — ${bundlePromoCode}`,
+          templateSubject: bundleHeadline || `Every plugin, one bundle — ${bundleDiscountValue} with ${bundlePromoCode}`,
+          aiMode: "bundle-promotion",
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        applyGenerated(data.html || "", data.subject, `Plugin Bundle Promotion — ${bundlePromoCode}`);
+        reportAiResult(data, "Bundle Promotion email generated!");
       } else {
         const data = await res.json().catch(() => ({}));
         toast.error(data.error || "Failed to generate");
@@ -2393,6 +2508,20 @@ ${productLogoUrl ? `- Display the product logo at the top of the email using: <i
             >
               <Crown className="h-3.5 w-3.5 mr-1.5" />
               CEOs Offer
+            </Button>
+            <Button
+              type="button"
+              variant={aiPanel === "bundle-promotion" ? "default" : "outline"}
+              size="sm"
+              className="h-8"
+              onClick={() => {
+                const next = aiPanel === "bundle-promotion" ? "none" : "bundle-promotion";
+                setAiPanel(next);
+                if (next === "bundle-promotion" && bundlePrompts.length === 0) fetchSavedPrompts("bundle-promotion");
+              }}
+            >
+              <Boxes className="h-3.5 w-3.5 mr-1.5" />
+              Bundle Promotion
             </Button>
             {swipeOneFields.length > 0 && (
               <span className="text-[10px] text-muted-foreground ml-1">
@@ -4588,6 +4717,230 @@ ${productLogoUrl ? `- Display the product logo at the top of the email using: <i
                   <Crown className="mr-2 h-4 w-4" />
                 )}
                 {generating ? "Generating..." : "Generate CEOs Offer email"}
+              </Button>
+            </div>
+          )}
+
+          {/* Bundle Promotion AI panel */}
+          {aiPanel === "bundle-promotion" && (
+            <div className="border p-3 space-y-3 bg-muted/20">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Boxes className="h-4 w-4" />
+                  Bundle Promotion — AI Generator
+                </div>
+                <div className="flex items-center gap-2">
+                  <Popover
+                    open={bundleResultsOpen}
+                    onOpenChange={(open) => {
+                      setBundleResultsOpen(open);
+                      if (open) fetchPreviousResults("bundle-promotion");
+                    }}
+                  >
+                    <PopoverTrigger
+                      render={
+                        <Button variant="outline" size="sm" className="h-7 text-xs"
+                          title="Load a previously generated or saved template without spending tokens">
+                          <RotateCcw className="h-3 w-3 mr-1.5" />
+                          Use Previous Results
+                        </Button>
+                      }
+                    />
+                    <PopoverContent align="end" className="w-[460px] p-0">
+                      <div className="px-3 pt-3 pb-2">
+                        <p className="text-sm font-medium">Previous Results — Bundle Promotion</p>
+                        <p className="text-xs text-muted-foreground">
+                          AI-generated and saved templates. Click one to load.
+                        </p>
+                      </div>
+                      <Separator />
+                      <ScrollArea className="max-h-[360px]">
+                        {bundleResultsLoading ? (
+                          <div className="flex items-center justify-center py-8">
+                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : bundleResults.length === 0 ? (
+                          <p className="text-sm text-muted-foreground text-center py-8">
+                            No saved results yet. Generate or save one first.
+                          </p>
+                        ) : (
+                          <div className="p-1">
+                            {bundleResults.map((t) => (
+                              <button
+                                key={t.id}
+                                type="button"
+                                onClick={() => {
+                                  applyDynamicTemplate(t);
+                                  setBundleResultsOpen(false);
+                                }}
+                                className="w-full text-left rounded-md px-3 py-2 hover:bg-accent transition-colors"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm font-medium truncate flex-1">{t.name}</p>
+                                  <Badge variant={t.source === "manual" ? "default" : "secondary"} className="text-[10px] px-1.5 py-0">
+                                    {t.source === "manual" ? "Saved" : "AI"}
+                                  </Badge>
+                                </div>
+                                {t.subject && (
+                                  <p className="text-[11px] text-muted-foreground truncate mt-0.5">{t.subject}</p>
+                                )}
+                                <p className="text-[10px] text-muted-foreground mt-0.5">
+                                  {new Date(t.createdAt).toLocaleString()}
+                                </p>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </ScrollArea>
+                    </PopoverContent>
+                  </Popover>
+                  <Popover
+                    open={bundlePromptsOpen}
+                    onOpenChange={(open) => {
+                      setBundlePromptsOpen(open);
+                      if (open && bundlePrompts.length === 0) fetchSavedPrompts("bundle-promotion");
+                    }}
+                  >
+                    <PopoverTrigger
+                      render={
+                        <Button variant="outline" size="sm" className="h-7 text-xs">
+                          <History className="h-3 w-3 mr-1.5" />
+                          Use Previous Prompts
+                        </Button>
+                      }
+                    />
+                    <PopoverContent align="end" className="w-[420px] p-0">
+                      <div className="px-3 pt-3 pb-2">
+                        <p className="text-sm font-medium">Previous Prompts — Bundle Promotion</p>
+                        <p className="text-xs text-muted-foreground">Click a prompt to fill the form</p>
+                      </div>
+                      <Separator />
+                      <ScrollArea className="max-h-[360px]">
+                        {bundlePromptsLoading ? (
+                          <div className="flex items-center justify-center py-8">
+                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : bundlePrompts.length === 0 ? (
+                          <p className="text-sm text-muted-foreground text-center py-8">
+                            No previous prompts yet for Bundle Promotion.
+                          </p>
+                        ) : (
+                          <div className="p-1">
+                            {bundlePrompts.map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => applyPrompt(p)}
+                                className="w-full text-left rounded-md px-3 py-2.5 hover:bg-accent transition-colors"
+                              >
+                                <p className="text-sm line-clamp-2">{p.prompt}</p>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {new Date(p.createdAt).toLocaleDateString()}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </ScrollArea>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-muted-foreground">
+                The bPlugins Plugin Bundle includes every plugin and is designed for businesses
+                (agencies, freelancers, and teams running multiple sites). The default landing
+                page is{" "}
+                <span className="font-mono">https://bplugins.com/plugin-bundle</span>.
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1.5 md:col-span-2">
+                  <Label className="text-xs">Headline / Hook</Label>
+                  <Input
+                    placeholder="Every plugin, one bundle — built for business"
+                    value={bundleHeadline}
+                    onChange={(e) => setBundleHeadline(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Promo Code <span className="text-destructive">*</span></Label>
+                  <Input
+                    placeholder="BUSINESS40"
+                    value={bundlePromoCode}
+                    onChange={(e) => setBundlePromoCode(e.target.value)}
+                    className="h-9 font-mono uppercase"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Discount <span className="text-destructive">*</span></Label>
+                  <Input
+                    placeholder="40% off the full plugin bundle"
+                    value={bundleDiscountValue}
+                    onChange={(e) => setBundleDiscountValue(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Sale End Date</Label>
+                  <Input
+                    placeholder="e.g. May 31, 2026"
+                    value={bundleEndDate}
+                    onChange={(e) => setBundleEndDate(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Bundle Landing Page URL <span className="text-destructive">*</span></Label>
+                  <Input
+                    placeholder="https://bplugins.com/plugin-bundle"
+                    value={landingPageUrl}
+                    onChange={(e) => setLandingPageUrl(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Pricing Page URL</Label>
+                  <Input
+                    placeholder="https://bplugins.com/pricing"
+                    value={pricingPageUrl}
+                    onChange={(e) => setPricingPageUrl(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5 md:col-span-2">
+                  <Label className="text-xs">Bundle Logo URL</Label>
+                  <Input
+                    placeholder="https://bplugins.com/logo.png"
+                    value={productLogoUrl}
+                    onChange={(e) => setProductLogoUrl(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Additional Instructions (optional)</Label>
+                <Textarea
+                  placeholder="Audience details, brand voice, accent colors, value props to emphasize..."
+                  value={bundleInstruction}
+                  onChange={(e) => setBundleInstruction(e.target.value)}
+                  rows={2}
+                />
+              </div>
+
+              <Button
+                onClick={handleGenerateBundlePromotion}
+                disabled={generating}
+                className="w-full"
+              >
+                {generating ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Boxes className="mr-2 h-4 w-4" />
+                )}
+                {generating ? "Generating..." : "Generate Bundle Promotion email"}
               </Button>
             </div>
           )}

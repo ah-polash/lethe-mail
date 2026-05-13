@@ -289,72 +289,151 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Try DB-configured AI provider first (OpenRouter, OpenAI, etc.)
+    // Try DB-configured AI provider first (OpenRouter, OpenAI, Anthropic, etc.)
     const aiConfig = await prisma.aiConfig.findFirst({ where: { isActive: true } });
 
     // Fall back to env var for backwards compatibility
     const apiKey = aiConfig?.apiKey || process.env.OPENAI_API_KEY;
-    const baseUrl = aiConfig?.baseUrl || "https://api.openai.com/v1";
+    // Trim trailing slash — `${baseUrl}/messages` produces a 404 path when baseUrl ends in "/".
+    const baseUrl = (aiConfig?.baseUrl || "https://api.openai.com/v1").replace(/\/+$/, "");
     const model = aiConfig?.model || "gpt-4o-mini";
+    const provider = aiConfig?.provider || "openai";
 
     let generatedHtml: string | null = null;
     let generatedSubject: string | null = null;
+    // Surfaced back to the caller so the UI can show why the AI call failed
+    // instead of silently returning a generic fallback template.
+    let aiError: string | null = null;
 
     if (apiKey) {
-      try {
-        const response = await fetch(`${baseUrl}/chat/completions`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-            ...(aiConfig?.provider === "openrouter" && {
-              "HTTP-Referer": process.env.NEXTAUTH_URL || "http://localhost:3000",
-              "X-Title": "Lethe Mail",
-            }),
-          },
-          body: JSON.stringify({
-            model,
-            messages: [
-              {
-                role: "system",
-                content: referenceImageUrl
-                  ? `You are an expert email template designer. The user has provided a screenshot of an email design as a reference. Analyze the screenshot carefully and recreate a similar email template in HTML. Match the layout, colors, typography, spacing, and overall design as closely as possible. Adapt the content based on the user's prompt. The style should be "${style || "general"}". Return a JSON object with two fields: "html" (the complete HTML email template with all styles inline for email client compatibility) and "subject" (a suggested email subject line). Only return valid JSON, no markdown.`
-                  : `You are an expert email template designer. Generate a professional, responsive HTML email template based on the user's prompt. The style should be "${style || "general"}". Return a JSON object with two fields: "html" (the complete HTML email template) and "subject" (a suggested email subject line). The HTML should be inline-styled for maximum email client compatibility. Make the design modern, clean, and professional. Only return valid JSON, no markdown.`,
-              },
-              {
-                role: "user",
-                content: referenceImageUrl
-                  ? [
-                      { type: "text", text: prompt || "Recreate this email design as an HTML email template." },
-                      { type: "image_url", image_url: { url: referenceImageUrl } },
-                    ]
-                  : prompt,
-              },
-            ],
-            temperature: 0.7,
-            max_tokens: 4000,
-          }),
-        });
+      const systemPrompt = referenceImageUrl
+        ? `You are an expert email template designer. The user has provided a screenshot of an email design as a reference. Analyze the screenshot carefully and recreate a similar email template in HTML. Match the layout, colors, typography, spacing, and overall design as closely as possible. Adapt the content based on the user's prompt. The style should be "${style || "general"}". Return a JSON object with two fields: "html" (the complete HTML email template with all styles inline for email client compatibility) and "subject" (a suggested email subject line). Only return valid JSON, no markdown.`
+        : `You are an expert email template designer. Generate a professional, responsive HTML email template based on the user's prompt. The style should be "${style || "general"}". Return a JSON object with two fields: "html" (the complete HTML email template) and "subject" (a suggested email subject line). The HTML should be inline-styled for maximum email client compatibility. Make the design modern, clean, and professional. Only return valid JSON, no markdown.`;
 
-        if (response.ok) {
-          const data = await response.json();
-          const content = data.choices?.[0]?.message?.content;
-          if (typeof content === "string" && content.trim() !== "") {
-            const extracted = extractHtmlAndSubject(content);
-            if (extracted) {
-              generatedHtml = extracted.html;
-              generatedSubject = extracted.subject ?? null;
+      try {
+        if (provider === "anthropic") {
+          // Anthropic /messages — system is top-level, response has content[0].text
+          const userContent: unknown = referenceImageUrl
+            ? [
+                { type: "text", text: prompt || "Recreate this email design as an HTML email template." },
+                { type: "image", source: { type: "url", url: referenceImageUrl } },
+              ]
+            : prompt;
+
+          const response = await fetch(`${baseUrl}/messages`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": apiKey,
+              "anthropic-version": "2023-06-01",
+            },
+            body: JSON.stringify({
+              model,
+              max_tokens: 4000,
+              // `temperature` is deprecated on Claude 4.x models — omit it.
+              system: systemPrompt,
+              messages: [{ role: "user", content: userContent }],
+            }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            // Anthropic returns content as an array of blocks; concatenate text blocks.
+            const blocks = Array.isArray(data.content) ? data.content : [];
+            const content = blocks
+              .filter((b: { type?: string }) => b.type === "text")
+              .map((b: { text?: string }) => b.text || "")
+              .join("");
+            if (content.trim() !== "") {
+              const extracted = extractHtmlAndSubject(content);
+              if (extracted) {
+                generatedHtml = extracted.html;
+                generatedSubject = extracted.subject ?? null;
+              } else {
+                aiError = "Could not extract HTML/subject from the Anthropic response. Try a different prompt.";
+                console.warn("[ai-generate] Could not extract html/subject from Anthropic response");
+              }
             } else {
-              console.warn("[ai-generate] Could not extract html/subject from LLM response");
+              aiError = "Anthropic returned an empty response.";
             }
+          } else {
+            // Anthropic error shape: { type: "error", error: { type, message } }
+            const errBody = (await response.json().catch(() => null)) as
+              | { error?: { message?: string; type?: string }; message?: string }
+              | null;
+            const msg =
+              errBody?.error?.message ||
+              errBody?.message ||
+              `Anthropic API returned HTTP ${response.status}`;
+            aiError = `Anthropic: ${msg}`;
+            console.warn("[ai-generate] Anthropic response not ok:", response.status, msg);
           }
         } else {
-          const errText = await response.text().catch(() => "");
-          console.warn("[ai-generate] LLM response not ok:", response.status, errText.slice(0, 300));
+          // OpenAI / OpenRouter — /chat/completions
+          const response = await fetch(`${baseUrl}/chat/completions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`,
+              ...(provider === "openrouter" && {
+                "HTTP-Referer": process.env.NEXTAUTH_URL || "http://localhost:3000",
+                "X-Title": "Lethe Mail",
+              }),
+            },
+            body: JSON.stringify({
+              model,
+              messages: [
+                { role: "system", content: systemPrompt },
+                {
+                  role: "user",
+                  content: referenceImageUrl
+                    ? [
+                        { type: "text", text: prompt || "Recreate this email design as an HTML email template." },
+                        { type: "image_url", image_url: { url: referenceImageUrl } },
+                      ]
+                    : prompt,
+                },
+              ],
+              temperature: 0.7,
+              max_tokens: 4000,
+            }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            const content = data.choices?.[0]?.message?.content;
+            if (typeof content === "string" && content.trim() !== "") {
+              const extracted = extractHtmlAndSubject(content);
+              if (extracted) {
+                generatedHtml = extracted.html;
+                generatedSubject = extracted.subject ?? null;
+              } else {
+                aiError = "Could not extract HTML/subject from the AI response.";
+                console.warn("[ai-generate] Could not extract html/subject from LLM response");
+              }
+            } else {
+              aiError = "AI returned an empty response.";
+            }
+          } else {
+            const errBody = (await response.json().catch(() => null)) as
+              | { error?: { message?: string } | string }
+              | null;
+            const errMsg =
+              typeof errBody?.error === "string"
+                ? errBody.error
+                : errBody?.error?.message;
+            const msg = errMsg || `API returned HTTP ${response.status}`;
+            aiError = `${provider}: ${msg}`;
+            console.warn("[ai-generate] LLM response not ok:", response.status, msg);
+          }
         }
       } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        aiError = `${provider}: ${msg}`;
         console.warn("[ai-generate] LLM request failed:", err);
       }
+    } else {
+      aiError = "No active AI configuration. Open Settings → AI Configuration to add one.";
     }
 
     // Fall back to a deterministic template if the LLM didn't produce usable content.
@@ -409,6 +488,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       html: generatedHtml,
       subject: generatedSubject,
+      // When set, the LLM call failed and a deterministic fallback template
+      // was returned. The UI should surface this so the user knows the
+      // provider didn't actually generate the content.
+      aiError,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal server error";
