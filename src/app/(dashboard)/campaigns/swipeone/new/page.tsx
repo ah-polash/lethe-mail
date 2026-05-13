@@ -479,6 +479,7 @@ export function SwipeOneCampaignEditor({
         setMarketingInstruction((prev) => (prev ? prev : v));
         setSaleInstruction((prev) => (prev ? prev : v));
         setBfcmInstruction((prev) => (prev ? prev : v));
+        setMdInstruction((prev) => (prev ? prev : v));
         setCeoInstruction((prev) => (prev ? prev : v));
       }
     } catch {
@@ -517,6 +518,18 @@ export function SwipeOneCampaignEditor({
           (i: SesIdentity) => i.verified && i.type === "EMAIL_ADDRESS"
         );
         setIdentities(emailOnly);
+        // Preselect the active SES connection's defaultFromEmail when it's
+        // still a verified identity AND the user hasn't picked one yet
+        // (only for new campaigns — edit mode loads `fromEmail` from the
+        // campaign record).
+        const defaultFrom = typeof d.defaultFromEmail === "string" ? d.defaultFromEmail.trim() : "";
+        if (
+          !existingCampaignId &&
+          defaultFrom &&
+          emailOnly.some((i: SesIdentity) => i.identity === defaultFrom)
+        ) {
+          setFromEmail((prev) => (prev ? prev : defaultFrom));
+        }
       })
       .catch(() => {})
       .finally(() => setIdentitiesLoading(false));
@@ -543,6 +556,23 @@ export function SwipeOneCampaignEditor({
     if (mapVarsOpen) loadPopularVariables();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapVarsOpen]);
+
+  useEffect(() => {
+    if (existingCampaignId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/app-settings?key=brand.name");
+        if (!res.ok) return;
+        const data = await res.json();
+        const v = typeof data?.value === "string" ? data.value.trim() : "";
+        if (!cancelled && v) {
+          setFromName((prev) => (prev ? prev : v));
+        }
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [existingCampaignId]);
 
   // Edit mode: when the editor is mounted with an existing campaignId
   // (from /campaigns/swipeone/[id] or after a duplicate redirect), fetch the
@@ -1469,18 +1499,17 @@ Pricing page: ${pricingPageUrl}${productLogoUrl ? `\nProduct logo: ${productLogo
 ${mdInstruction ? `Additional instructions: ${mdInstruction}` : ""}
 
 Requirements:
-- This is a MOTHER'S DAY promotional email — design it to feel warm, heartfelt, celebratory, and gift-worthy
-- Use a soft, floral palette (blush pink, rose, dusty mauve, cream, sage green) with tasteful floral or heart accents — keep it elegant, not cutesy
-- Lead with a warm hero section: a heartfelt headline${mdHeadline ? ` (use "${mdHeadline}" or a refined version)` : " honoring moms and announcing the sale"}, a 1–2 sentence subheading framing the product as a thoughtful gift or self-care treat, and a primary CTA button
+- This is a MOTHER'S DAY promotional email — design it to feel warm, heartfelt, and gift-worthy
+- Use a soft, floral palette (blush pink, rose, dusty mauve, cream, sage green) with tasteful floral or heart accents while staying tasteful and on-brand
+- Lead with a warm hero section: large headline${mdHeadline ? ` (use "${mdHeadline}" or a refined version)` : " honoring moms and announcing the Mother's Day sale"}, a 1–2 sentence subheading selling the value, and a primary CTA button
 - Display the promo code "${mdPromoCode}" prominently — render it inside a high-contrast, dashed-border code box that's easy to copy, with helper text such as "Use code at checkout"
-- Make the discount "${mdDiscountValue}" visually dominant after the headline
-${mdEndDate ? `- Reinforce gentle urgency by clearly stating the sale ends ${mdEndDate}; consider phrases like "Ends ${mdEndDate}" near the CTA` : "- Add gentle urgency wording (e.g. \"Limited time\") even without a fixed end date"}
-- Primary CTA button must link to ${landingPageUrl} with warm, action-oriented copy (e.g. "Treat mom today", "Claim your gift", "Shop the Mother's Day sale")
+- Make the discount "${mdDiscountValue}" the most visually dominant element after the headline
+${mdEndDate ? `- Reinforce urgency by clearly stating the sale ends ${mdEndDate}; consider phrases like "Ends ${mdEndDate}" near the CTA` : "- Add gentle urgency wording (e.g. \"Limited time\") even without a fixed end date"}
+- Primary CTA button must link to ${landingPageUrl} with action-oriented copy (e.g. "Treat mom today", "Claim your discount", "Shop the Mother's Day sale")
 - Add a secondary, lower-emphasis link to the pricing page ${pricingPageUrl} (e.g. "View pricing")
-- Frame the offer around honoring mothers, gifting, or self-care — keep tone sincere and inclusive (acknowledge that not every reader is a mom, but everyone has someone to celebrate)
 - Close with a final reminder of the promo code and end date${productLogoUrl ? `\n- Display the product logo at the top of the email using the provided URL: <img src="${productLogoUrl}" alt="${productName}" style="max-width:128px;height:auto;display:block;" />` : ""}
 - Use inline styles for email compatibility
-- Make it responsive and visually polished — this should feel like a tasteful seasonal campaign, not a flashy clearance blast${buildVariableHint()}`;
+- Make it responsive and visually polished — this should feel like a seasonal marketing campaign, not a transactional notification${buildVariableHint()}`;
 
       const res = await fetch("/api/templates/generate", {
         method: "POST",

@@ -46,7 +46,38 @@ export async function verifySesConnection(): Promise<{ success: boolean; error?:
   }
 }
 
-// List verified email identities from SES
+async function listIdentitiesWithClient(
+  client: SESv2Client
+): Promise<{ identity: string; type: string; verified: boolean }[]> {
+  const listResult = await client.send(new ListEmailIdentitiesCommand({ PageSize: 100 }));
+  const items = listResult.EmailIdentities || [];
+
+  const identities: { identity: string; type: string; verified: boolean }[] = [];
+
+  for (const item of items) {
+    if (!item.IdentityName) continue;
+    try {
+      const detail = await client.send(
+        new GetEmailIdentityCommand({ EmailIdentity: item.IdentityName })
+      );
+      identities.push({
+        identity: item.IdentityName,
+        type: item.IdentityType || "UNKNOWN",
+        verified: detail.VerifiedForSendingStatus ?? false,
+      });
+    } catch {
+      identities.push({
+        identity: item.IdentityName,
+        type: item.IdentityType || "UNKNOWN",
+        verified: false,
+      });
+    }
+  }
+
+  return identities;
+}
+
+// List verified email identities from SES (uses the active config).
 export async function listVerifiedIdentities(): Promise<{
   identities: { identity: string; type: string; verified: boolean }[];
   error?: string;
@@ -55,33 +86,33 @@ export async function listVerifiedIdentities(): Promise<{
     const client = await getSesClient();
     if (!client) return { identities: [], error: "No SES configuration found" };
 
-    const listResult = await client.send(new ListEmailIdentitiesCommand({ PageSize: 100 }));
-    const items = listResult.EmailIdentities || [];
+    const identities = await listIdentitiesWithClient(client);
+    return { identities };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return { identities: [], error: message };
+  }
+}
 
-    const identities: { identity: string; type: string; verified: boolean }[] = [];
-
-    for (const item of items) {
-      if (!item.IdentityName) continue;
-
-      // Get verification status
-      try {
-        const detail = await client.send(
-          new GetEmailIdentityCommand({ EmailIdentity: item.IdentityName })
-        );
-        identities.push({
-          identity: item.IdentityName,
-          type: item.IdentityType || "UNKNOWN",
-          verified: detail.VerifiedForSendingStatus ?? false,
-        });
-      } catch {
-        identities.push({
-          identity: item.IdentityName,
-          type: item.IdentityType || "UNKNOWN",
-          verified: false,
-        });
-      }
-    }
-
+// List verified email identities from SES using arbitrary credentials.
+// Used by the Settings dialog when configuring a non-active connection.
+export async function listVerifiedIdentitiesFor(creds: {
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+}): Promise<{
+  identities: { identity: string; type: string; verified: boolean }[];
+  error?: string;
+}> {
+  try {
+    const client = new SESv2Client({
+      region: creds.region,
+      credentials: {
+        accessKeyId: creds.accessKeyId,
+        secretAccessKey: creds.secretAccessKey,
+      },
+    });
+    const identities = await listIdentitiesWithClient(client);
     return { identities };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";

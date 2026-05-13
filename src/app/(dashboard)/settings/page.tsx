@@ -39,7 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Eye, EyeOff, Pencil, Plus, Power, Trash2, Star, X } from "lucide-react";
+import { ChevronDown, Eye, EyeOff, Loader2, Pencil, Plus, Power, Trash2, Star, X } from "lucide-react";
 import { toast } from "sonner";
 
 // --- Types ---
@@ -59,7 +59,14 @@ interface SesConfig {
   accessKeyId: string;
   secretAccessKey: string;
   configSetName: string;
+  defaultFromEmail: string;
   isActive?: boolean;
+}
+
+interface SesIdentity {
+  identity: string;
+  type: string;
+  verified: boolean;
 }
 
 interface SwipeOneConfig {
@@ -140,6 +147,7 @@ const emptySes: SesConfig = {
   accessKeyId: "",
   secretAccessKey: "",
   configSetName: "",
+  defaultFromEmail: "",
 };
 
 const emptySwipeone: SwipeOneConfig = {
@@ -179,6 +187,9 @@ export default function SettingsPage() {
   const [testingSes, setTestingSes] = useState(false);
   const [showSesAccessKey, setShowSesAccessKey] = useState(false);
   const [showSesSecretKey, setShowSesSecretKey] = useState(false);
+  const [sesDialogIdentities, setSesDialogIdentities] = useState<SesIdentity[]>([]);
+  const [sesDialogIdentitiesLoading, setSesDialogIdentitiesLoading] = useState(false);
+  const [sesDialogIdentitiesError, setSesDialogIdentitiesError] = useState<string | null>(null);
 
   // SwipeOne
   const [swipeoneConfigs, setSwipeoneConfigs] = useState<SwipeOneConfig[]>([]);
@@ -216,15 +227,25 @@ export default function SettingsPage() {
   const [showR2AccessKey, setShowR2AccessKey] = useState(false);
   const [showR2SecretKey, setShowR2SecretKey] = useState(false);
 
+  // Brand Settings (App Settings)
+  const [brandName, setBrandName] = useState("");
+  const [brandSlogan, setBrandSlogan] = useState("");
+  const [brandLogoUrl, setBrandLogoUrl] = useState("");
+  const [brandWebsite, setBrandWebsite] = useState("");
+  const [savingBrand, setSavingBrand] = useState(false);
+  const [brandOpen, setBrandOpen] = useState(false);
+
   // Products (App Settings)
   const [products, setProducts] = useState<ProductType[]>([]);
   const [productRows, setProductRows] = useState<ProductType[]>([]);
   const [savingProducts, setSavingProducts] = useState(false);
+  const [productsOpen, setProductsOpen] = useState(false);
 
   // Campaign Categories (App Settings)
   const [categories, setCategories] = useState<CampaignCategoryType[]>([]);
   const [categoryRows, setCategoryRows] = useState<CampaignCategoryType[]>([]);
   const [savingCategories, setSavingCategories] = useState(false);
+  const [categoriesOpen, setCategoriesOpen] = useState(false);
 
   // Prompt configuration (AI Settings)
   const [predefinedInstruction, setPredefinedInstruction] = useState("");
@@ -303,6 +324,48 @@ export default function SettingsPage() {
       }
     } catch { /* ignore */ }
   }, []);
+
+  const loadBrand = useCallback(async () => {
+    try {
+      const res = await fetch("/api/app-settings");
+      if (res.ok) {
+        const data = await res.json();
+        const s = (data.settings || {}) as Record<string, string>;
+        setBrandName(s["brand.name"] || "");
+        setBrandSlogan(s["brand.slogan"] || "");
+        setBrandLogoUrl(s["brand.logoUrl"] || "");
+        setBrandWebsite(s["brand.website"] || "");
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const handleSaveBrand = async () => {
+    setSavingBrand(true);
+    try {
+      const entries: Array<[string, string]> = [
+        ["brand.name", brandName.trim()],
+        ["brand.slogan", brandSlogan.trim()],
+        ["brand.logoUrl", brandLogoUrl.trim()],
+        ["brand.website", brandWebsite.trim()],
+      ];
+      for (const [key, value] of entries) {
+        const res = await fetch("/api/app-settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key, value }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `Failed to save ${key}`);
+        }
+      }
+      toast.success("Brand settings saved");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save brand settings");
+    } finally {
+      setSavingBrand(false);
+    }
+  };
 
   const loadPredefinedInstruction = useCallback(async () => {
     try {
@@ -389,6 +452,7 @@ export default function SettingsPage() {
     loadR2Configs();
     loadProducts();
     loadCategories();
+    loadBrand();
     loadPredefinedInstruction();
     fetch("/api/users")
       .then((r) => r.json())
@@ -404,16 +468,42 @@ export default function SettingsPage() {
     loadR2Configs,
     loadProducts,
     loadCategories,
+    loadBrand,
     loadPredefinedInstruction,
   ]);
 
   // --- SES Handlers ---
+
+  const loadSesDialogIdentities = useCallback(async (configId: string) => {
+    setSesDialogIdentitiesLoading(true);
+    setSesDialogIdentitiesError(null);
+    try {
+      const res = await fetch(`/api/ses/${configId}/identities`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSesDialogIdentities([]);
+        setSesDialogIdentitiesError(data.error || `HTTP ${res.status}`);
+        return;
+      }
+      const emailOnly = ((data.identities || []) as SesIdentity[]).filter(
+        (i) => i.verified && i.type === "EMAIL_ADDRESS"
+      );
+      setSesDialogIdentities(emailOnly);
+    } catch (err) {
+      setSesDialogIdentities([]);
+      setSesDialogIdentitiesError(err instanceof Error ? err.message : "Failed to load");
+    } finally {
+      setSesDialogIdentitiesLoading(false);
+    }
+  }, []);
 
   const openSesCreate = () => {
     setSesForm(emptySes);
     setSesEditing(false);
     setShowSesAccessKey(false);
     setShowSesSecretKey(false);
+    setSesDialogIdentities([]);
+    setSesDialogIdentitiesError(null);
     setSesDialogOpen(true);
   };
 
@@ -422,7 +512,10 @@ export default function SettingsPage() {
     setSesEditing(true);
     setShowSesAccessKey(false);
     setShowSesSecretKey(false);
+    setSesDialogIdentities([]);
+    setSesDialogIdentitiesError(null);
     setSesDialogOpen(true);
+    if (config.id) loadSesDialogIdentities(config.id);
   };
 
   const handleSaveSes = async () => {
@@ -1190,16 +1283,102 @@ export default function SettingsPage() {
         <TabsContent value="app" className="mt-6 space-y-6">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Campaign Category</CardTitle>
-                  <CardDescription>
-                    Define campaign categories so recipients can unsubscribe from a specific
-                    category instead of every email. These categories appear on the
-                    unsubscribe page.
-                  </CardDescription>
+              <div className="flex items-center justify-between gap-4">
+                <button
+                  type="button"
+                  onClick={() => setBrandOpen((v) => !v)}
+                  className="flex items-start gap-2 text-left flex-1 min-w-0 group"
+                  aria-expanded={brandOpen}
+                >
+                  <ChevronDown
+                    className={`h-5 w-5 mt-0.5 shrink-0 text-muted-foreground transition-transform ${
+                      brandOpen ? "" : "-rotate-90"
+                    }`}
+                  />
+                  <div className="min-w-0">
+                    <CardTitle className="group-hover:underline">Brand Settings</CardTitle>
+                    <CardDescription>
+                      Configure your brand identity. The Brand Name and Logo are shown in the
+                      sidebar header. Brand Name is also used as the default &quot;From Name&quot;
+                      when creating a new campaign.
+                    </CardDescription>
+                  </div>
+                </button>
+                <div className="flex gap-2 shrink-0">
+                  <Button onClick={handleSaveBrand} disabled={savingBrand}>
+                    {savingBrand ? "Saving..." : "Save Changes"}
+                  </Button>
                 </div>
-                <div className="flex gap-2">
+              </div>
+            </CardHeader>
+            {brandOpen && (
+            <CardContent>
+              <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="brand-name">Brand Name</Label>
+                  <Input
+                    id="brand-name"
+                    placeholder="e.g. bPlugins"
+                    value={brandName}
+                    onChange={(e) => setBrandName(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="brand-slogan">Brand Slogan</Label>
+                  <Input
+                    id="brand-slogan"
+                    placeholder="e.g. Email Marketing Platform"
+                    value={brandSlogan}
+                    onChange={(e) => setBrandSlogan(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="brand-logo">Logo URL</Label>
+                  <Input
+                    id="brand-logo"
+                    placeholder="https://example.com/logo.png"
+                    value={brandLogoUrl}
+                    onChange={(e) => setBrandLogoUrl(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="brand-website">Website</Label>
+                  <Input
+                    id="brand-website"
+                    placeholder="https://example.com"
+                    value={brandWebsite}
+                    onChange={(e) => setBrandWebsite(e.target.value)}
+                  />
+                </div>
+              </div>
+            </CardContent>
+            )}
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between gap-4">
+                <button
+                  type="button"
+                  onClick={() => setCategoriesOpen((v) => !v)}
+                  className="flex items-start gap-2 text-left flex-1 min-w-0 group"
+                  aria-expanded={categoriesOpen}
+                >
+                  <ChevronDown
+                    className={`h-5 w-5 mt-0.5 shrink-0 text-muted-foreground transition-transform ${
+                      categoriesOpen ? "" : "-rotate-90"
+                    }`}
+                  />
+                  <div className="min-w-0">
+                    <CardTitle className="group-hover:underline">Campaign Category</CardTitle>
+                    <CardDescription>
+                      Define campaign categories so recipients can unsubscribe from a specific
+                      category instead of every email. These categories appear on the
+                      unsubscribe page.
+                    </CardDescription>
+                  </div>
+                </button>
+                <div className="flex gap-2 shrink-0">
                   <Button variant="outline" onClick={addCategoryRow}>
                     <Plus className="mr-2 h-4 w-4" />
                     Add Category
@@ -1210,6 +1389,7 @@ export default function SettingsPage() {
                 </div>
               </div>
             </CardHeader>
+            {categoriesOpen && (
             <CardContent>
               {categoryRows.length === 0 ? (
                 <p className="text-muted-foreground text-sm text-center py-8">
@@ -1323,18 +1503,31 @@ export default function SettingsPage() {
                 </div>
               )}
             </CardContent>
+            )}
           </Card>
 
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Product Settings</CardTitle>
-                  <CardDescription>
-                    Configure product data for future use. Add one row per product.
-                  </CardDescription>
-                </div>
-                <div className="flex gap-2">
+              <div className="flex items-center justify-between gap-4">
+                <button
+                  type="button"
+                  onClick={() => setProductsOpen((v) => !v)}
+                  className="flex items-start gap-2 text-left flex-1 min-w-0 group"
+                  aria-expanded={productsOpen}
+                >
+                  <ChevronDown
+                    className={`h-5 w-5 mt-0.5 shrink-0 text-muted-foreground transition-transform ${
+                      productsOpen ? "" : "-rotate-90"
+                    }`}
+                  />
+                  <div className="min-w-0">
+                    <CardTitle className="group-hover:underline">Product Settings</CardTitle>
+                    <CardDescription>
+                      Configure product data for future use. Add one row per product.
+                    </CardDescription>
+                  </div>
+                </button>
+                <div className="flex gap-2 shrink-0">
                   <Button variant="outline" onClick={addProductRow}>
                     <Plus className="mr-2 h-4 w-4" />
                     Add Product
@@ -1345,6 +1538,7 @@ export default function SettingsPage() {
                 </div>
               </div>
             </CardHeader>
+            {productsOpen && (
             <CardContent>
               {productRows.length === 0 ? (
                 <p className="text-muted-foreground text-sm text-center py-8">
@@ -1429,6 +1623,7 @@ export default function SettingsPage() {
                 </div>
               )}
             </CardContent>
+            )}
           </Card>
         </TabsContent>
 
@@ -1605,6 +1800,68 @@ export default function SettingsPage() {
                       {showSesSecretKey ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
                     </Button>
                   </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ses-default-from">
+                    Default Mail From{" "}
+                    <span className="text-xs text-muted-foreground font-normal">(optional)</span>
+                  </Label>
+                  {!sesEditing ? (
+                    <p className="text-xs text-muted-foreground">
+                      Save the connection first, then edit it to pick a default from the verified
+                      identities of this SES account.
+                    </p>
+                  ) : sesDialogIdentitiesLoading ? (
+                    <div className="flex items-center text-xs text-muted-foreground h-9">
+                      <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                      Loading identities...
+                    </div>
+                  ) : sesDialogIdentitiesError ? (
+                    <div className="space-y-1">
+                      <p className="text-xs text-destructive">
+                        Failed to load identities: {sesDialogIdentitiesError}
+                      </p>
+                      <Input
+                        id="ses-default-from"
+                        placeholder="do-not-reply@example.com"
+                        value={sesForm.defaultFromEmail}
+                        onChange={(e) =>
+                          setSesForm({ ...sesForm, defaultFromEmail: e.target.value })
+                        }
+                      />
+                    </div>
+                  ) : sesDialogIdentities.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      No verified email identities on this SES account.
+                    </p>
+                  ) : (
+                    <Select
+                      value={sesForm.defaultFromEmail || "__none__"}
+                      onValueChange={(v) =>
+                        setSesForm({
+                          ...sesForm,
+                          defaultFromEmail: v === "__none__" ? "" : v,
+                        })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="None — no default" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">None — no default</SelectItem>
+                        {sesDialogIdentities.map((i) => (
+                          <SelectItem key={i.identity} value={i.identity}>
+                            {i.identity}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    When this connection is active, the &quot;From Email&quot; field on the New
+                    Campaign page will preselect this address (if it&apos;s still a verified
+                    identity).
+                  </p>
                 </div>
                 <Button onClick={handleSaveSes} disabled={savingSes} className="w-full">
                   {savingSes ? "Saving..." : sesEditing ? "Update Connection" : "Create Connection"}

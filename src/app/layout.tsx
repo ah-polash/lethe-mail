@@ -3,6 +3,9 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { Toaster } from "@/components/ui/sonner";
+import { BrandFavicon } from "@/components/layout/brand-favicon";
+import { PlaceholderShortcut } from "@/components/layout/placeholder-shortcut";
+import { Analytics } from "@vercel/analytics/next";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -34,6 +37,9 @@ export default function RootLayout({
           {children}
           <Toaster richColors position="top-right" />
         </Providers>
+        <BrandFavicon />
+        <PlaceholderShortcut />
+        <Analytics />
       </body>
     </html>
   );

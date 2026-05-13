@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
+import { prisma } from "@/lib/db";
 import { listVerifiedIdentities } from "@/lib/ses";
 
-// GET: List verified SES identities (emails and domains)
+// GET: List verified SES identities (emails and domains) for the active
+// connection, plus that connection's defaultFromEmail (if set) so the campaign
+// editor can preselect it.
 export async function GET() {
   try {
     await requireAuth();
@@ -13,7 +16,12 @@ export async function GET() {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
 
-    return NextResponse.json({ identities: result.identities });
+    const active = await prisma.sesConfig.findFirst({ where: { isActive: true } });
+
+    return NextResponse.json({
+      identities: result.identities,
+      defaultFromEmail: active?.defaultFromEmail || "",
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal server error";
     if (message === "Unauthorized") {

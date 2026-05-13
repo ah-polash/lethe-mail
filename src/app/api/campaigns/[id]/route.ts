@@ -243,17 +243,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
     }
 
-    // Drafts and scheduled campaigns can be deleted (scheduled = future send
-    // that hasn't fired yet, equivalent to cancelling). Anything that has
-    // already sent or is currently sending stays around so analytics and
-    // bounce/complaint events keep their parent campaign intact.
-    if (campaign.status !== "draft" && campaign.status !== "scheduled") {
-      return NextResponse.json(
-        { error: "Only draft or scheduled campaigns can be deleted" },
-        { status: 400 }
-      );
-    }
-
+    // Dev/test: any campaign can be deleted (will be tightened later).
     if (session.role !== "super_admin" && campaign.createdBy !== session.id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

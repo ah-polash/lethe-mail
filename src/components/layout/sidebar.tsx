@@ -36,6 +36,18 @@ interface User {
   role: "super_admin" | "general_user";
 }
 
+interface Brand {
+  name: string;
+  slogan: string;
+  logoUrl: string;
+}
+
+const DEFAULT_BRAND: Brand = {
+  name: "bPlugins",
+  slogan: "Email Marketing",
+  logoUrl: "",
+};
+
 const navLinks: { href: string; label: string; icon: typeof LayoutDashboard; exact?: boolean }[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/campaigns", label: "Campaigns", icon: Send },
@@ -46,9 +58,11 @@ const navLinks: { href: string; label: string; icon: typeof LayoutDashboard; exa
 
 function NavContent({
   user,
+  brand,
   onLogout,
 }: {
   user: User | null;
+  brand: Brand;
   onLogout: () => void;
 }) {
   const pathname = usePathname();
@@ -56,8 +70,20 @@ function NavContent({
   return (
     <div className="flex h-full flex-col">
       <div className="p-6">
-        <h1 className="text-2xl font-bold tracking-tight">bPlugins</h1>
-        <p className="text-xs text-muted-foreground mt-1">Email Marketing</p>
+        <div className="flex items-center gap-2">
+          {brand.logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={brand.logoUrl}
+              alt={brand.name}
+              className="h-8 w-8 rounded object-contain shrink-0"
+            />
+          ) : null}
+          <h1 className="text-2xl font-bold tracking-tight truncate">{brand.name}</h1>
+        </div>
+        {brand.slogan ? (
+          <p className="text-xs text-muted-foreground mt-1">{brand.slogan}</p>
+        ) : null}
       </div>
 
       <Separator />
@@ -190,6 +216,7 @@ function NavContent({
 
 export function Sidebar() {
   const [user, setUser] = useState<User | null>(null);
+  const [brand, setBrand] = useState<Brand>(DEFAULT_BRAND);
   const [loading, setLoading] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const router = useRouter();
@@ -213,6 +240,23 @@ export function Sidebar() {
     fetchUser();
   }, [router]);
 
+  useEffect(() => {
+    async function fetchBrand() {
+      try {
+        const res = await fetch("/api/app-settings");
+        if (!res.ok) return;
+        const data = await res.json();
+        const s = (data.settings || {}) as Record<string, string>;
+        setBrand({
+          name: s["brand.name"]?.trim() || DEFAULT_BRAND.name,
+          slogan: s["brand.slogan"]?.trim() || DEFAULT_BRAND.slogan,
+          logoUrl: s["brand.logoUrl"]?.trim() || "",
+        });
+      } catch { /* keep default */ }
+    }
+    fetchBrand();
+  }, []);
+
   const handleLogout = async () => {
     try {
       await fetch("/api/auth", { method: "DELETE" });
@@ -226,7 +270,7 @@ export function Sidebar() {
     return (
       <aside className="hidden lg:flex w-64 flex-col border-r bg-card">
         <div className="p-6">
-          <h1 className="text-2xl font-bold tracking-tight">bPlugins</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{brand.name}</h1>
         </div>
       </aside>
     );
@@ -242,14 +286,14 @@ export function Sidebar() {
           </SheetTrigger>
           <SheetContent side="left" className="w-64 p-0">
             <SheetTitle className="sr-only">Navigation</SheetTitle>
-            <NavContent user={user} onLogout={handleLogout} />
+            <NavContent user={user} brand={brand} onLogout={handleLogout} />
           </SheetContent>
         </Sheet>
       </div>
 
       {/* Desktop sidebar */}
       <aside className="hidden lg:flex w-64 flex-col border-r bg-card min-h-screen sticky top-0">
-        <NavContent user={user} onLogout={handleLogout} />
+        <NavContent user={user} brand={brand} onLogout={handleLogout} />
       </aside>
     </>
   );

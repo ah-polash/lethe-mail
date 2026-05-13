@@ -62,7 +62,9 @@ interface Campaign {
   status: string;
   totalRecipients: number;
   totalSent: number;
+  totalDelivered: number;
   totalOpened: number;
+  totalClicked: number;
   createdAt: string;
   scheduledAt: string | null;
   audienceSource: string;
@@ -405,8 +407,9 @@ export default function CampaignsPage() {
                   <TableHead>Name</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Recipients</TableHead>
-                  <TableHead className="text-right">Sent</TableHead>
-                  <TableHead className="text-right">Opens</TableHead>
+                  <TableHead className="text-right">Delivered</TableHead>
+                  <TableHead className="text-right">Open</TableHead>
+                  <TableHead className="text-right">Clicks</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -441,10 +444,13 @@ export default function CampaignsPage() {
                       {(campaign.totalRecipients || 0).toLocaleString()}
                     </TableCell>
                     <TableCell className="text-right">
-                      {(campaign.totalSent || 0).toLocaleString()}
+                      {(campaign.totalDelivered || 0).toLocaleString()}
                     </TableCell>
                     <TableCell className="text-right">
                       {(campaign.totalOpened || 0).toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {(campaign.totalClicked || 0).toLocaleString()}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {new Date(campaign.createdAt).toLocaleDateString()}
@@ -557,44 +563,61 @@ export default function CampaignsPage() {
                             )}
                           </Button>
                         )}
-                        {(campaign.status === "draft" || campaign.status === "scheduled") && (
-                          <AlertDialog>
-                            <AlertDialogTrigger render={<Button variant="ghost" size="icon" />}>
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>
-                                  {campaign.status === "scheduled" ? "Cancel & Delete Scheduled Campaign" : "Delete Campaign"}
-                                </AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  {campaign.status === "scheduled" ? (
-                                    <>
-                                      &quot;{campaign.name}&quot; is scheduled to send
-                                      {campaign.scheduledAt
-                                        ? ` on ${new Date(campaign.scheduledAt).toLocaleString()}`
-                                        : ""}.
-                                      Deleting will cancel that send. This action cannot be undone.
-                                    </>
-                                  ) : (
-                                    <>
-                                      Are you sure you want to delete &quot;{campaign.name}&quot;?
-                                      This action cannot be undone.
-                                    </>
-                                  )}
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction
-                                  onClick={() => handleDelete(campaign.id)}
-                                >
-                                  Delete
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        )}
+                        <AlertDialog>
+                          <AlertDialogTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                title="Delete campaign (dev/test)"
+                              />
+                            }
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle className="flex items-center gap-2">
+                                {campaign.status === "scheduled"
+                                  ? "Cancel & Delete Scheduled Campaign"
+                                  : "Delete Campaign"}
+                                <Badge variant="outline" className="text-[10px]">Dev / Test</Badge>
+                              </AlertDialogTitle>
+                              <AlertDialogDescription>
+                                {campaign.status === "scheduled" ? (
+                                  <>
+                                    &quot;{campaign.name}&quot; is scheduled to send
+                                    {campaign.scheduledAt
+                                      ? ` on ${new Date(campaign.scheduledAt).toLocaleString()}`
+                                      : ""}.
+                                    Deleting will cancel that send. This action cannot be undone.
+                                  </>
+                                ) : campaign.status === "sent" || campaign.status === "sending" ? (
+                                  <>
+                                    &quot;{campaign.name}&quot; has already been sent (status:{" "}
+                                    <span className="font-mono">{campaign.status}</span>). Deleting
+                                    will also remove all associated tracking events
+                                    (opens/clicks/bounces). This action cannot be undone and will
+                                    affect reporting.
+                                  </>
+                                ) : (
+                                  <>
+                                    Are you sure you want to delete &quot;{campaign.name}&quot;?
+                                    This action cannot be undone.
+                                  </>
+                                )}
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() => handleDelete(campaign.id)}
+                              >
+                                Delete
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
                       </div>
                     </TableCell>
                   </TableRow>

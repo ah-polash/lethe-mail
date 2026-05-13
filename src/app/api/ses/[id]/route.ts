@@ -24,7 +24,7 @@ export async function PUT(
       return NextResponse.json({ error: "Config not found" }, { status: 404 });
     }
 
-    const { name, region, accessKeyId, secretAccessKey, configSetName } =
+    const { name, region, accessKeyId, secretAccessKey, configSetName, defaultFromEmail } =
       await request.json();
 
     const config = await prisma.sesConfig.update({
@@ -35,6 +35,7 @@ export async function PUT(
         ...(accessKeyId !== undefined && { accessKeyId }),
         ...(secretAccessKey !== undefined && { secretAccessKey }),
         ...(configSetName !== undefined && { configSetName: configSetName || null }),
+        ...(defaultFromEmail !== undefined && { defaultFromEmail: defaultFromEmail || null }),
       },
     });
 

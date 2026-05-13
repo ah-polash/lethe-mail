@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
   try {
     await requireSuperAdmin();
 
-    const { name, region, accessKeyId, secretAccessKey, configSetName } =
+    const { name, region, accessKeyId, secretAccessKey, configSetName, defaultFromEmail } =
       await request.json();
 
     if (!region || !accessKeyId || !secretAccessKey) {
@@ -50,6 +50,7 @@ export async function POST(request: NextRequest) {
         accessKeyId,
         secretAccessKey,
         configSetName: configSetName || null,
+        defaultFromEmail: defaultFromEmail || null,
         isActive: existingCount === 0,
       },
     });
