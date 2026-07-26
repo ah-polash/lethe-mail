@@ -16,10 +16,107 @@ model User {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  campaigns        Campaign[]
-  templates        EmailTemplate[]
-  aiPrompts        AiPrompt[]
-  dynamicTemplates DynamicTemplate[]
+  campaigns         Campaign[]
+  templates         EmailTemplate[]
+  aiPrompts         AiPrompt[]
+  dynamicTemplates  DynamicTemplate[]
+  emailSequences    EmailSequence[]
+  sequenceTemplates SequenceTemplate[]
+  feedbackReports   FeedbackReport[]
+}
+
+// Bug reports & feature requests submitted from the sidebar. Any authenticated
+// user can submit and view; only super admins change `status`.
+model FeedbackReport {
+  id            String   @id @default(uuid())
+  type          String   @default("bug") // bug | feature
+  title         String
+  description   String
+  screenshotUrl String?
+  status        String   @default("waiting_initial_review") // waiting_initial_review | reviewed | under_development | fixed_shipped
+  createdBy     String
+  creator       User     @relation(fields: [createdBy], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([status])
+}
+
+// Library of email templates generated from a sequence's "Generate all email
+// steps" action. Mirrors DynamicTemplate but tagged with sequence/step/product
+// context so they can be browsed on their own page.
+model SequenceTemplate {
+  id           String   @id @default(uuid())
+  name         String
+  subject      String?
+  htmlContent  String
+  sequenceId   Int?
+  sequenceName String?
+  stepNumber   Int?
+  productName  String?
+  createdBy    String
+  creator      User     @relation(fields: [createdBy], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([sequenceId])
+}
+
+// A numbered list of AI-designed email steps. There is NO built-in scheduler:
+// the external system (e.g. a WordPress plugin) fires a specific step by POSTing
+// the contact payload to /send/{id}/{stepNumber}. The `id` is the numeric
+// sequence id shown in the webhook URL; each step is addressed by its 1-based
+// stepNumber.
+model EmailSequence {
+  id           Int      @id @default(autoincrement())
+  name         String
+  description  String?
+  fromEmail    String   @default("")
+  fromName     String   @default("bPlugins")
+  status       String   @default("active") // active | paused
+  sequenceType String   @default("freemius_event") // freemius_event | lead_nurture | upsell | cross_sell | discount | free_to_paid | win_back | renewal | review_request | gift_from_ceo
+  emailField   String   @default("email") // dot-path to the recipient email in the webhook payload
+  eventField   String   @default("type")  // dot-path to the event name in the payload (Freemius: "type")
+  webhookToken String   @unique @default(uuid()) // secret for the /send endpoint
+  createdBy    String
+  creator      User     @relation(fields: [createdBy], references: [id])
+  steps        EmailSequenceStep[]
+  sends        SequenceSendLog[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model EmailSequenceStep {
+  id          String   @id @default(uuid())
+  sequenceId  Int
+  sequence    EmailSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  stepNumber  Int      // 1-based, addressed directly in the send URL
+  name        String?
+  eventType   String?  // when the sequence webhook receives this event name, this step fires
+  subject     String   @default("")
+  htmlContent String   @default("")
+  aiPrompt    String?  // captured prompt used to generate this step (if AI)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([sequenceId, stepNumber])
+  @@index([sequenceId])
+}
+
+// Audit log of every fired step send. Also powers idempotency-free reporting.
+model SequenceSendLog {
+  id         String   @id @default(uuid())
+  sequenceId Int
+  sequence   EmailSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  stepNumber Int
+  email      String
+  status     String   @default("sent") // sent | suppressed | failed
+  messageId  String?
+  error      String?
+  createdAt  DateTime @default(now())
+
+  @@index([sequenceId])
+  @@index([email])
 }
 
 model SesConfig {
@@ -189,6 +286,21 @@ model R2Config {
   isActive        Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+}
+
+// Freemius developer-scope API credentials. Multiple accounts supported (like
+// R2Config); the active one is used to pull the products/plugins list into the
+// Email Sequence editor. Auth is HMAC-SHA256 request signing (dev id + public +
+// secret key) — see src/lib/freemius.ts.
+model FreemiusConfig {
+  id          String   @id @default(uuid())
+  name        String   @default("Default")
+  developerId String
+  publicKey   String
+  secretKey   String
+  isActive    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model DynamicTemplate {

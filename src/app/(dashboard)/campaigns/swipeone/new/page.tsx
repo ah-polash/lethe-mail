@@ -44,6 +44,7 @@ import {
   Flower,
   Crown,
   Boxes,
+  Handshake,
   History,
   Plus,
   Trash2,
@@ -107,7 +108,8 @@ type AiPanel =
   | "bfcm-sale"
   | "mothers-day-sale"
   | "ceo-offer"
-  | "bundle-promotion";
+  | "bundle-promotion"
+  | "guestpost-collab";
 
 const AI_MODE_LABELS: Record<string, string> = {
   "true": "Regular",
@@ -119,6 +121,7 @@ const AI_MODE_LABELS: Record<string, string> = {
   "mothers-day-sale": "Mother's Day Sale",
   "ceo-offer": "CEOs Offer",
   "bundle-promotion": "Bundle Promotion",
+  "guestpost-collab": "Guestpost Collaboration",
 };
 
 const aiModeLabel = (mode: string | null | undefined) =>
@@ -363,6 +366,17 @@ export function SwipeOneCampaignEditor({
   const [bundleHeadline, setBundleHeadline] = useState("");
   const [bundleInstruction, setBundleInstruction] = useState("");
 
+  // Guestpost Collaboration fields (CEOs outreach to WordPress product sites/blogs)
+  const [guestpostPrompts, setGuestpostPrompts] = useState<SavedPrompt[]>([]);
+  const [guestpostPromptsLoading, setGuestpostPromptsLoading] = useState(false);
+  const [guestpostPromptsOpen, setGuestpostPromptsOpen] = useState(false);
+  const [guestpostTargetSite, setGuestpostTargetSite] = useState("");
+  const [guestpostTargetAudience, setGuestpostTargetAudience] = useState("");
+  const [guestpostTopics, setGuestpostTopics] = useState("");
+  const [guestpostHeadline, setGuestpostHeadline] = useState("");
+  const [guestpostInstruction, setGuestpostInstruction] = useState("");
+  const [selectedGuestpostProductId, setSelectedGuestpostProductId] = useState<string>("");
+
   // Saved AI results / Dynamic Templates (per panel)
   const [regularResults, setRegularResults] = useState<DynamicTemplateRow[]>([]);
   const [regularResultsLoading, setRegularResultsLoading] = useState(false);
@@ -399,6 +413,10 @@ export function SwipeOneCampaignEditor({
   const [bundleResults, setBundleResults] = useState<DynamicTemplateRow[]>([]);
   const [bundleResultsLoading, setBundleResultsLoading] = useState(false);
   const [bundleResultsOpen, setBundleResultsOpen] = useState(false);
+
+  const [guestpostResults, setGuestpostResults] = useState<DynamicTemplateRow[]>([]);
+  const [guestpostResultsLoading, setGuestpostResultsLoading] = useState(false);
+  const [guestpostResultsOpen, setGuestpostResultsOpen] = useState(false);
 
   // Save As Dynamic Template dialog
   const [saveDynamicOpen, setSaveDynamicOpen] = useState(false);
@@ -499,6 +517,7 @@ export function SwipeOneCampaignEditor({
         setMdInstruction((prev) => (prev ? prev : v));
         setCeoInstruction((prev) => (prev ? prev : v));
         setBundleInstruction((prev) => (prev ? prev : v));
+        setGuestpostInstruction((prev) => (prev ? prev : v));
       }
     } catch {
       // optional
@@ -675,6 +694,7 @@ export function SwipeOneCampaignEditor({
         | "mothers-day-sale"
         | "ceo-offer"
         | "bundle-promotion"
+        | "guestpost-collab"
     ) => {
       if (mode === "true") setRegularPromptsLoading(true);
       else if (mode === "product-update") setProductPromptsLoading(true);
@@ -684,7 +704,8 @@ export function SwipeOneCampaignEditor({
       else if (mode === "bfcm-sale") setBfcmPromptsLoading(true);
       else if (mode === "mothers-day-sale") setMdPromptsLoading(true);
       else if (mode === "ceo-offer") setCeoPromptsLoading(true);
-      else setBundlePromptsLoading(true);
+      else if (mode === "bundle-promotion") setBundlePromptsLoading(true);
+      else setGuestpostPromptsLoading(true);
       try {
         const res = await fetch(`/api/ai-prompts?aiMode=${encodeURIComponent(mode)}`);
         if (res.ok) {
@@ -697,7 +718,8 @@ export function SwipeOneCampaignEditor({
           else if (mode === "bfcm-sale") setBfcmPrompts(data.prompts || []);
           else if (mode === "mothers-day-sale") setMdPrompts(data.prompts || []);
           else if (mode === "ceo-offer") setCeoPrompts(data.prompts || []);
-          else setBundlePrompts(data.prompts || []);
+          else if (mode === "bundle-promotion") setBundlePrompts(data.prompts || []);
+          else setGuestpostPrompts(data.prompts || []);
         }
       } catch {
         // ignore
@@ -710,7 +732,8 @@ export function SwipeOneCampaignEditor({
         else if (mode === "bfcm-sale") setBfcmPromptsLoading(false);
         else if (mode === "mothers-day-sale") setMdPromptsLoading(false);
         else if (mode === "ceo-offer") setCeoPromptsLoading(false);
-        else setBundlePromptsLoading(false);
+        else if (mode === "bundle-promotion") setBundlePromptsLoading(false);
+        else setGuestpostPromptsLoading(false);
       }
     },
     []
@@ -917,6 +940,29 @@ Only use these exact variable names. Place them where they make sense — at min
       if (instructionMatch) setCeoInstruction(instructionMatch[1].trim());
       setAiPanel("ceo-offer");
       setCeoPromptsOpen(false);
+    } else if (p.aiMode === "guestpost-collab") {
+      const productMatch = p.prompt.match(/WordPress product:\s*"([^"]+)"/);
+      if (productMatch) setProductName(productMatch[1]);
+      const ceoNameMatch = p.prompt.match(/CEO name:\s*"([^"]+)"/);
+      if (ceoNameMatch) setCeoName(ceoNameMatch[1]);
+      const ceoPhotoMatch = p.prompt.match(/CEO photo:\s*(\S+)/);
+      if (ceoPhotoMatch) setCeoPhotoUrl(ceoPhotoMatch[1]);
+      const targetSiteMatch = p.prompt.match(/Target site:\s*"([^"]+)"/);
+      if (targetSiteMatch) setGuestpostTargetSite(targetSiteMatch[1]);
+      const audienceMatch = p.prompt.match(/Target audience:\s*"([^"]+)"/);
+      if (audienceMatch) setGuestpostTargetAudience(audienceMatch[1]);
+      const topicsMatch = p.prompt.match(/Suggested topics:\s*([\s\S]+?)(?:\n\n|\nHeadline|\nProduct|\nAdditional|$)/);
+      if (topicsMatch) setGuestpostTopics(topicsMatch[1].trim());
+      const headlineMatch = p.prompt.match(/Headline\/hook:\s*"([^"]+)"/);
+      if (headlineMatch) setGuestpostHeadline(headlineMatch[1]);
+      const landingMatch = p.prompt.match(/Product landing page:\s*(\S+)/);
+      if (landingMatch) setLandingPageUrl(landingMatch[1]);
+      const logoMatch = p.prompt.match(/Product logo:\s*(\S+)/);
+      if (logoMatch) setProductLogoUrl(logoMatch[1]);
+      const instructionMatch = p.prompt.match(/Additional instructions:\s*([\s\S]+?)(?:\n\nRequirements:|$)/);
+      if (instructionMatch) setGuestpostInstruction(instructionMatch[1].trim());
+      setAiPanel("guestpost-collab");
+      setGuestpostPromptsOpen(false);
     } else {
       setAiPrompt(p.prompt);
       setAiStyle(p.style || "professional");
@@ -1068,6 +1114,7 @@ Only use these exact variable names. Place them where they make sense — at min
     | "mothers-day-sale"
     | "ceo-offer"
     | "bundle-promotion"
+    | "guestpost-collab"
     | "true" =>
     aiPanel === "product-update"
       ? "product-update"
@@ -1085,7 +1132,9 @@ Only use these exact variable names. Place them where they make sense — at min
                   ? "ceo-offer"
                   : aiPanel === "bundle-promotion"
                     ? "bundle-promotion"
-                    : "true";
+                    : aiPanel === "guestpost-collab"
+                      ? "guestpost-collab"
+                      : "true";
 
   const openSaveDynamic = () => {
     if (!htmlContent.trim()) {
@@ -1145,6 +1194,7 @@ Only use these exact variable names. Place them where they make sense — at min
         | "mothers-day-sale"
         | "ceo-offer"
         | "bundle-promotion"
+        | "guestpost-collab"
     ) => {
       if (mode === "true") setRegularResultsLoading(true);
       else if (mode === "product-update") setProductResultsLoading(true);
@@ -1154,7 +1204,8 @@ Only use these exact variable names. Place them where they make sense — at min
       else if (mode === "bfcm-sale") setBfcmResultsLoading(true);
       else if (mode === "mothers-day-sale") setMdResultsLoading(true);
       else if (mode === "ceo-offer") setCeoResultsLoading(true);
-      else setBundleResultsLoading(true);
+      else if (mode === "bundle-promotion") setBundleResultsLoading(true);
+      else setGuestpostResultsLoading(true);
       try {
         const res = await fetch(`/api/dynamic-templates?aiMode=${encodeURIComponent(mode)}`);
         if (res.ok) {
@@ -1168,7 +1219,8 @@ Only use these exact variable names. Place them where they make sense — at min
           else if (mode === "bfcm-sale") setBfcmResults(list);
           else if (mode === "mothers-day-sale") setMdResults(list);
           else if (mode === "ceo-offer") setCeoResults(list);
-          else setBundleResults(list);
+          else if (mode === "bundle-promotion") setBundleResults(list);
+          else setGuestpostResults(list);
         }
       } catch {
         // ignore
@@ -1181,7 +1233,8 @@ Only use these exact variable names. Place them where they make sense — at min
         else if (mode === "bfcm-sale") setBfcmResultsLoading(false);
         else if (mode === "mothers-day-sale") setMdResultsLoading(false);
         else if (mode === "ceo-offer") setCeoResultsLoading(false);
-        else setBundleResultsLoading(false);
+        else if (mode === "bundle-promotion") setBundleResultsLoading(false);
+        else setGuestpostResultsLoading(false);
       }
     },
     []
@@ -1703,6 +1756,74 @@ Requirements:
         const data = await res.json();
         applyGenerated(data.html || "", data.subject, `Plugin Bundle Promotion — ${bundlePromoCode}`);
         reportAiResult(data, "Bundle Promotion email generated!");
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to generate");
+      }
+    } catch {
+      toast.error("Failed to generate");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleGenerateGuestpostCollab = async () => {
+    if (!productName) { toast.error("WordPress product name is required"); return; }
+    if (!ceoName) { toast.error("CEO name is required"); return; }
+    if (!guestpostTargetSite) { toast.error("Target site is required"); return; }
+    if (!landingPageUrl) { toast.error("Product landing page URL is required"); return; }
+
+    setGenerating(true);
+    try {
+      const prompt = `Generate a Guestpost Collaboration outreach email — a personal note from a CEO to the team of another WordPress-focused site/blog, proposing a guest-post collaboration.
+
+WordPress product: "${productName}"
+CEO name: "${ceoName}"${ceoPhotoUrl ? `\nCEO photo: ${ceoPhotoUrl}` : ""}
+Target site: "${guestpostTargetSite}"${guestpostTargetAudience ? `\nTarget audience: "${guestpostTargetAudience}"` : ""}
+${guestpostTopics ? `Suggested topics:\n${guestpostTopics}\n` : ""}${guestpostHeadline ? `Headline/hook: "${guestpostHeadline}"\n` : ""}Product landing page: ${landingPageUrl}${productLogoUrl ? `\nProduct logo: ${productLogoUrl}` : ""}
+
+${guestpostInstruction ? `Additional instructions: ${guestpostInstruction}` : ""}
+
+Requirements:
+- This is a one-to-one outreach email from ${ceoName} (CEO of ${productName}) to the editorial / partnerships team at ${guestpostTargetSite} — it should read as a sincere, founder-led message, NOT a marketing blast
+- Open with a warm, first-person greeting addressed to the ${guestpostTargetSite} team (e.g. "Hi ${guestpostTargetSite} team," — keep a {{firstName}} placeholder available in case a specific contact is mapped later)
+- Briefly introduce ${ceoName} as the CEO of ${productName}, with one sentence on what ${productName} is and the WordPress audience it serves
+- Clearly state the ask: a guest-post collaboration on ${guestpostTargetSite}, offering high-quality, original content tailored to ${guestpostTargetSite}'s readers${guestpostTargetAudience ? ` (audience: ${guestpostTargetAudience})` : ""}
+- Lead with reader value, not promotion — explain how the proposed content will help ${guestpostTargetSite}'s audience
+${guestpostTopics ? `- Present the suggested topics as a clean bulleted list so the recipient can quickly skim and pick one. Format the list using a styled <ul> with concise titles derived from the topics provided` : "- Offer to send a shortlist of topic ideas tailored to the site"}
+${guestpostHeadline ? `- Use "${guestpostHeadline}" (or a refined version) as the hero headline / subject hook` : ""}
+- Be transparent that ${productName} is happy to mention/link the product naturally if relevant, but the post itself will be editorial-first (not a sales piece)
+- Offer flexibility on word count, format, and editorial control — make it easy to say yes
+- Close with a clear, low-friction next step (e.g. "Reply with the topic that interests you most and I'll get a draft over within a week")
+- Sign off personally with "${ceoName}" and a "CEO, ${productName}" line
+${ceoPhotoUrl ? `- Include a small circular CEO portrait near the signature using: <img src="${ceoPhotoUrl}" alt="${ceoName}" style="width:72px;height:72px;border-radius:50%;display:block;object-fit:cover;" />` : "- Leave space for a CEO portrait near the signature"}
+${productLogoUrl ? `- Display the product logo subtly at the top of the email using: <img src="${productLogoUrl}" alt="${productName}" style="max-width:128px;height:auto;display:block;" />` : ""}
+- Primary CTA / link should point to the product landing page ${landingPageUrl} (e.g. "Learn more about ${productName}"), but kept understated — this is an outreach email, not a sales page
+- Use a clean, trust-building, editorial palette (white / off-white background, dark text, single restrained accent color) — minimal imagery, calm typography
+- Tone: founder-to-founder, respectful, concise, no buzzwords, no aggressive sales language
+- Use inline styles for email compatibility
+- Make it responsive and visually polished — it should feel like a personal email, not a marketing newsletter${buildVariableHint()}`;
+
+      const res = await fetch("/api/templates/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          style: "professional",
+          templateName: `${productName} — Guestpost Collab with ${guestpostTargetSite}`,
+          templateSubject: guestpostHeadline || `Guest-post collaboration with ${guestpostTargetSite}? — ${ceoName}, ${productName}`,
+          aiMode: "guestpost-collab",
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        applyGenerated(
+          data.html || "",
+          data.subject,
+          `${productName} — Guestpost Collab with ${guestpostTargetSite}`
+        );
+        reportAiResult(data, "Guestpost collaboration email generated!");
       } else {
         const data = await res.json().catch(() => ({}));
         toast.error(data.error || "Failed to generate");
@@ -2522,6 +2643,20 @@ Requirements:
             >
               <Boxes className="h-3.5 w-3.5 mr-1.5" />
               Bundle Promotion
+            </Button>
+            <Button
+              type="button"
+              variant={aiPanel === "guestpost-collab" ? "default" : "outline"}
+              size="sm"
+              className="h-8"
+              onClick={() => {
+                const next = aiPanel === "guestpost-collab" ? "none" : "guestpost-collab";
+                setAiPanel(next);
+                if (next === "guestpost-collab" && guestpostPrompts.length === 0) fetchSavedPrompts("guestpost-collab");
+              }}
+            >
+              <Handshake className="h-3.5 w-3.5 mr-1.5" />
+              Guestpost Collaboration
             </Button>
             {swipeOneFields.length > 0 && (
               <span className="text-[10px] text-muted-foreground ml-1">
@@ -4941,6 +5076,285 @@ Requirements:
                   <Boxes className="mr-2 h-4 w-4" />
                 )}
                 {generating ? "Generating..." : "Generate Bundle Promotion email"}
+              </Button>
+            </div>
+          )}
+
+          {/* Guestpost Collaboration AI panel */}
+          {aiPanel === "guestpost-collab" && (
+            <div className="border p-3 space-y-3 bg-muted/20">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Handshake className="h-4 w-4" />
+                  Guestpost Collaboration — AI Generator
+                </div>
+                <div className="flex items-center gap-2">
+                  <Popover
+                    open={guestpostResultsOpen}
+                    onOpenChange={(open) => {
+                      setGuestpostResultsOpen(open);
+                      if (open) fetchPreviousResults("guestpost-collab");
+                    }}
+                  >
+                    <PopoverTrigger
+                      render={
+                        <Button variant="outline" size="sm" className="h-7 text-xs"
+                          title="Load a previously generated or saved template without spending tokens">
+                          <RotateCcw className="h-3 w-3 mr-1.5" />
+                          Use Previous Results
+                        </Button>
+                      }
+                    />
+                    <PopoverContent align="end" className="w-[460px] p-0">
+                      <div className="px-3 pt-3 pb-2">
+                        <p className="text-sm font-medium">Previous Results — Guestpost Collaboration</p>
+                        <p className="text-xs text-muted-foreground">
+                          AI-generated and saved templates. Click one to load.
+                        </p>
+                      </div>
+                      <Separator />
+                      <ScrollArea className="max-h-[360px]">
+                        {guestpostResultsLoading ? (
+                          <div className="flex items-center justify-center py-8">
+                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : guestpostResults.length === 0 ? (
+                          <p className="text-sm text-muted-foreground text-center py-8">
+                            No saved results yet. Generate or save one first.
+                          </p>
+                        ) : (
+                          <div className="p-1">
+                            {guestpostResults.map((t) => (
+                              <button
+                                key={t.id}
+                                type="button"
+                                onClick={() => {
+                                  applyDynamicTemplate(t);
+                                  setGuestpostResultsOpen(false);
+                                }}
+                                className="w-full text-left rounded-md px-3 py-2 hover:bg-accent transition-colors"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm font-medium truncate flex-1">{t.name}</p>
+                                  <Badge variant={t.source === "manual" ? "default" : "secondary"} className="text-[10px] px-1.5 py-0">
+                                    {t.source === "manual" ? "Saved" : "AI"}
+                                  </Badge>
+                                </div>
+                                {t.subject && (
+                                  <p className="text-[11px] text-muted-foreground truncate mt-0.5">{t.subject}</p>
+                                )}
+                                <p className="text-[10px] text-muted-foreground mt-0.5">
+                                  {new Date(t.createdAt).toLocaleString()}
+                                </p>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </ScrollArea>
+                    </PopoverContent>
+                  </Popover>
+                  <Popover
+                    open={guestpostPromptsOpen}
+                    onOpenChange={(open) => {
+                      setGuestpostPromptsOpen(open);
+                      if (open && guestpostPrompts.length === 0) fetchSavedPrompts("guestpost-collab");
+                    }}
+                  >
+                    <PopoverTrigger
+                      render={
+                        <Button variant="outline" size="sm" className="h-7 text-xs">
+                          <History className="h-3 w-3 mr-1.5" />
+                          Use Previous Prompts
+                        </Button>
+                      }
+                    />
+                    <PopoverContent align="end" className="w-[420px] p-0">
+                      <div className="px-3 pt-3 pb-2">
+                        <p className="text-sm font-medium">Previous Prompts — Guestpost Collaboration</p>
+                        <p className="text-xs text-muted-foreground">Click a prompt to fill the form</p>
+                      </div>
+                      <Separator />
+                      <ScrollArea className="max-h-[360px]">
+                        {guestpostPromptsLoading ? (
+                          <div className="flex items-center justify-center py-8">
+                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : guestpostPrompts.length === 0 ? (
+                          <p className="text-sm text-muted-foreground text-center py-8">
+                            No previous prompts yet for Guestpost Collaboration.
+                          </p>
+                        ) : (
+                          <div className="p-1">
+                            {guestpostPrompts.map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => applyPrompt(p)}
+                                className="w-full text-left rounded-md px-3 py-2.5 hover:bg-accent transition-colors"
+                              >
+                                <p className="text-sm line-clamp-2">{p.prompt}</p>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {new Date(p.createdAt).toLocaleDateString()}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </ScrollArea>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-muted-foreground">
+                A founder-to-founder outreach email proposing a guest-post collaboration. Sent from the CEO&apos;s
+                inbox to the editorial / partnerships team at another WordPress-focused site or blog.
+              </p>
+
+              {productOptions.length > 0 && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Load From Listed Products</Label>
+                  <Select
+                    value={selectedGuestpostProductId}
+                    onValueChange={(v) => {
+                      const id = v || "";
+                      setSelectedGuestpostProductId(id);
+                      const p = productOptions.find((o) => o.id === id);
+                      if (p) {
+                        setProductName(p.name || "");
+                        setProductLogoUrl(p.logoUrl || "");
+                        setLandingPageUrl(p.landingPageUrl || "");
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="h-9 w-full">
+                      <SelectValue placeholder="Select a product to autofill the fields below">
+                        {(value) => {
+                          const id = typeof value === "string" ? value : "";
+                          const p = productOptions.find((o) => o.id === id);
+                          return p
+                            ? p.name
+                            : "Select a product to autofill the fields below";
+                        }}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {productOptions.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">WordPress Product Name <span className="text-destructive">*</span></Label>
+                  <Input
+                    placeholder="e.g. Acme WP Plugin"
+                    value={productName}
+                    onChange={(e) => setProductName(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">CEO Name <span className="text-destructive">*</span></Label>
+                  <Input
+                    placeholder="e.g. Jane Doe"
+                    value={ceoName}
+                    onChange={(e) => setCeoName(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5 md:col-span-2">
+                  <Label className="text-xs">CEO Photo URL</Label>
+                  <Input
+                    placeholder="https://example.com/ceo.jpg (square portrait works best)"
+                    value={ceoPhotoUrl}
+                    onChange={(e) => setCeoPhotoUrl(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Target Site <span className="text-destructive">*</span></Label>
+                  <Input
+                    placeholder="e.g. WP Tavern, Kinsta Blog, WPBeginner"
+                    value={guestpostTargetSite}
+                    onChange={(e) => setGuestpostTargetSite(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Target Audience</Label>
+                  <Input
+                    placeholder="e.g. WordPress agencies, plugin developers"
+                    value={guestpostTargetAudience}
+                    onChange={(e) => setGuestpostTargetAudience(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5 md:col-span-2">
+                  <Label className="text-xs">Headline / Hook</Label>
+                  <Input
+                    placeholder="e.g. A guest post idea for your WordPress audience"
+                    value={guestpostHeadline}
+                    onChange={(e) => setGuestpostHeadline(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Product Landing Page URL <span className="text-destructive">*</span></Label>
+                  <Input
+                    placeholder="https://example.com"
+                    value={landingPageUrl}
+                    onChange={(e) => setLandingPageUrl(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Product Logo URL</Label>
+                  <Input
+                    placeholder="https://ps.w.org/{slug}/assets/icon-128x128.png"
+                    value={productLogoUrl}
+                    onChange={(e) => setProductLogoUrl(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Suggested Topics (one per line)</Label>
+                <Textarea
+                  placeholder={"How to choose a WordPress plugin in 2026\nLessons from building a SaaS for WordPress\nA practical guide to WP performance"}
+                  value={guestpostTopics}
+                  onChange={(e) => setGuestpostTopics(e.target.value)}
+                  rows={3}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Additional Instructions (optional)</Label>
+                <Textarea
+                  placeholder="Tone, prior relationship, specific editors, accent color..."
+                  value={guestpostInstruction}
+                  onChange={(e) => setGuestpostInstruction(e.target.value)}
+                  rows={2}
+                />
+              </div>
+
+              <Button
+                onClick={handleGenerateGuestpostCollab}
+                disabled={generating}
+                className="w-full"
+              >
+                {generating ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Handshake className="mr-2 h-4 w-4" />
+                )}
+                {generating ? "Generating..." : "Generate Guestpost Collaboration email"}
               </Button>
             </div>
           )}

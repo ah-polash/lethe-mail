@@ -99,6 +99,15 @@ interface R2ConfigType {
   isActive?: boolean;
 }
 
+interface FreemiusConfigType {
+  id?: string;
+  name: string;
+  developerId: string;
+  publicKey: string;
+  secretKey: string;
+  isActive?: boolean;
+}
+
 interface ProductType {
   id?: string;
   name: string;
@@ -174,6 +183,13 @@ const emptyR2: R2ConfigType = {
   publicUrl: "",
 };
 
+const emptyFreemius: FreemiusConfigType = {
+  name: "",
+  developerId: "",
+  publicKey: "",
+  secretKey: "",
+};
+
 export default function SettingsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -226,6 +242,15 @@ export default function SettingsPage() {
   const [testingR2, setTestingR2] = useState(false);
   const [showR2AccessKey, setShowR2AccessKey] = useState(false);
   const [showR2SecretKey, setShowR2SecretKey] = useState(false);
+
+  // Freemius Config
+  const [freemiusConfigs, setFreemiusConfigs] = useState<FreemiusConfigType[]>([]);
+  const [freemiusForm, setFreemiusForm] = useState<FreemiusConfigType>(emptyFreemius);
+  const [freemiusDialogOpen, setFreemiusDialogOpen] = useState(false);
+  const [freemiusEditing, setFreemiusEditing] = useState(false);
+  const [savingFreemius, setSavingFreemius] = useState(false);
+  const [testingFreemius, setTestingFreemius] = useState(false);
+  const [showFreemiusSecret, setShowFreemiusSecret] = useState(false);
 
   // Brand Settings (App Settings)
   const [brandName, setBrandName] = useState("");
@@ -321,6 +346,16 @@ export default function SettingsPage() {
       if (res.ok) {
         const data = await res.json();
         setR2Configs(data.configs || []);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const loadFreemiusConfigs = useCallback(async () => {
+    try {
+      const res = await fetch("/api/freemius-config");
+      if (res.ok) {
+        const data = await res.json();
+        setFreemiusConfigs(data.configs || []);
       }
     } catch { /* ignore */ }
   }, []);
@@ -450,6 +485,7 @@ export default function SettingsPage() {
     loadSwipeOneFieldList();
     loadAiConfigs();
     loadR2Configs();
+    loadFreemiusConfigs();
     loadProducts();
     loadCategories();
     loadBrand();
@@ -466,6 +502,7 @@ export default function SettingsPage() {
     loadSwipeOneFieldList,
     loadAiConfigs,
     loadR2Configs,
+    loadFreemiusConfigs,
     loadProducts,
     loadCategories,
     loadBrand,
@@ -964,6 +1001,102 @@ export default function SettingsPage() {
     }
   };
 
+  // --- Freemius Config Handlers ---
+
+  const openFreemiusCreate = () => {
+    setFreemiusForm(emptyFreemius);
+    setFreemiusEditing(false);
+    setShowFreemiusSecret(false);
+    setFreemiusDialogOpen(true);
+  };
+
+  const openFreemiusEdit = (config: FreemiusConfigType) => {
+    setFreemiusForm(config);
+    setFreemiusEditing(true);
+    setShowFreemiusSecret(false);
+    setFreemiusDialogOpen(true);
+  };
+
+  const handleSaveFreemius = async () => {
+    if (!freemiusForm.developerId || !freemiusForm.publicKey || !freemiusForm.secretKey) {
+      toast.error("Developer ID, Public Key, and Secret Key are required");
+      return;
+    }
+
+    setSavingFreemius(true);
+    try {
+      const isEdit = freemiusEditing && freemiusForm.id;
+      const url = isEdit ? `/api/freemius-config/${freemiusForm.id}` : "/api/freemius-config";
+      const method = isEdit ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(freemiusForm),
+      });
+
+      if (res.ok) {
+        toast.success(isEdit ? "Freemius account updated" : "Freemius account created");
+        setFreemiusDialogOpen(false);
+        loadFreemiusConfigs();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to save Freemius account");
+      }
+    } catch {
+      toast.error("Failed to save Freemius account");
+    } finally {
+      setSavingFreemius(false);
+    }
+  };
+
+  const handleDeleteFreemius = async (id: string) => {
+    try {
+      const res = await fetch(`/api/freemius-config/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        toast.success("Freemius account deleted");
+        loadFreemiusConfigs();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to delete");
+      }
+    } catch {
+      toast.error("Failed to delete account");
+    }
+  };
+
+  const handleSetActiveFreemius = async (id: string) => {
+    try {
+      const res = await fetch(`/api/freemius-config/${id}`, { method: "PATCH" });
+      if (res.ok) {
+        toast.success("Active Freemius account updated");
+        loadFreemiusConfigs();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to set active");
+      }
+    } catch {
+      toast.error("Failed to set active account");
+    }
+  };
+
+  const handleTestFreemius = async () => {
+    setTestingFreemius(true);
+    try {
+      const res = await fetch("/api/freemius-config", { method: "PUT" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success(data.message || "Freemius connection successful!");
+      } else {
+        toast.error(data.error || "Freemius connection failed");
+      }
+    } catch {
+      toast.error("Freemius connection test failed");
+    } finally {
+      setTestingFreemius(false);
+    }
+  };
+
   // --- Prompt Configuration Handlers ---
 
   const handleSavePredefinedInstruction = async () => {
@@ -1276,6 +1409,7 @@ export default function SettingsPage() {
           <TabsTrigger value="swipeone">SwipeOne Connections</TabsTrigger>
           <TabsTrigger value="ai">AI Configuration</TabsTrigger>
           <TabsTrigger value="r2">Cloudflare R2</TabsTrigger>
+          <TabsTrigger value="freemius">Freemius</TabsTrigger>
           <TabsTrigger value="users">User Management</TabsTrigger>
         </TabsList>
 
@@ -2610,6 +2744,152 @@ export default function SettingsPage() {
                 </p>
                 <Button onClick={handleSaveR2} disabled={savingR2} className="w-full">
                   {savingR2 ? "Saving..." : r2Editing ? "Update Connection" : "Create Connection"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </TabsContent>
+
+        {/* ===== FREEMIUS TAB ===== */}
+        <TabsContent value="freemius" className="mt-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Freemius Accounts</CardTitle>
+                  <CardDescription>
+                    Connect Freemius developer accounts to pull your products (plugins) into the Email
+                    Sequence editor. Add multiple accounts and mark one active.
+                  </CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleTestFreemius}
+                    disabled={testingFreemius || freemiusConfigs.every((c) => !c.isActive)}
+                  >
+                    {testingFreemius ? "Testing..." : "Test Active"}
+                  </Button>
+                  <Button onClick={openFreemiusCreate}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Account
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {freemiusConfigs.length === 0 ? (
+                <p className="text-muted-foreground text-sm text-center py-8">
+                  No Freemius accounts configured. Add one to pull your product list.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Developer ID</TableHead>
+                      <TableHead>Public Key</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {freemiusConfigs.map((config) => (
+                      <TableRow key={config.id}>
+                        <TableCell className="font-medium">{config.name}</TableCell>
+                        <TableCell className="text-muted-foreground text-sm font-mono">{config.developerId}</TableCell>
+                        <TableCell className="text-muted-foreground text-sm font-mono truncate max-w-[200px]">{config.publicKey}</TableCell>
+                        <TableCell>
+                          {config.isActive ? (
+                            <Badge>Active</Badge>
+                          ) : (
+                            <Badge variant="secondary">Inactive</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            {!config.isActive && (
+                              <Button variant="ghost" size="icon" title="Set as active" onClick={() => handleSetActiveFreemius(config.id!)}>
+                                <Power className="h-4 w-4" />
+                              </Button>
+                            )}
+                            <Button variant="ghost" size="icon" title="Edit" onClick={() => openFreemiusEdit(config)}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            {!config.isActive && (
+                              <Button variant="ghost" size="icon" title="Delete" onClick={() => handleDeleteFreemius(config.id!)}>
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Freemius Config Dialog */}
+          <Dialog open={freemiusDialogOpen} onOpenChange={setFreemiusDialogOpen}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>{freemiusEditing ? "Edit Freemius Account" : "New Freemius Account"}</DialogTitle>
+                <DialogDescription>
+                  Enter your Freemius developer API credentials
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 mt-2">
+                <div className="grid gap-4 grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="fs-name">Account Name</Label>
+                    <Input
+                      id="fs-name"
+                      placeholder="e.g. bPlugins"
+                      value={freemiusForm.name}
+                      onChange={(e) => setFreemiusForm({ ...freemiusForm, name: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="fs-dev-id">Developer ID</Label>
+                    <Input
+                      id="fs-dev-id"
+                      placeholder="Your Freemius Developer ID"
+                      value={freemiusForm.developerId}
+                      onChange={(e) => setFreemiusForm({ ...freemiusForm, developerId: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="fs-public-key">Public Key</Label>
+                  <Input
+                    id="fs-public-key"
+                    placeholder="pk_..."
+                    value={freemiusForm.publicKey}
+                    onChange={(e) => setFreemiusForm({ ...freemiusForm, publicKey: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="fs-secret-key">Secret Key</Label>
+                  <div className="relative">
+                    <Input
+                      id="fs-secret-key"
+                      type={showFreemiusSecret ? "text" : "password"}
+                      placeholder="sk_..."
+                      value={freemiusForm.secretKey}
+                      onChange={(e) => setFreemiusForm({ ...freemiusForm, secretKey: e.target.value })}
+                    />
+                    <Button type="button" variant="ghost" size="icon" className="absolute right-0 top-0 h-full px-3 hover:bg-transparent" onClick={() => setShowFreemiusSecret(!showFreemiusSecret)}>
+                      {showFreemiusSecret ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Find these in your Freemius Developer Dashboard &rarr; Settings &rarr; Keys (Developer ID, Public Key, Secret Key). These grant developer-scope API access to list your products.
+                </p>
+                <Button onClick={handleSaveFreemius} disabled={savingFreemius} className="w-full">
+                  {savingFreemius ? "Saving..." : freemiusEditing ? "Update Account" : "Create Account"}
                 </Button>
               </div>
             </DialogContent>

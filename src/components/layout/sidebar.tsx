@@ -15,6 +15,9 @@ import {
   Sparkles,
   ShieldAlert,
   UserMinus,
+  Mails,
+  Layers,
+  MessageSquareWarning,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -52,8 +55,10 @@ const navLinks: { href: string; label: string; icon: typeof LayoutDashboard; exa
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/campaigns", label: "Campaigns", icon: Send },
   { href: "/campaigns/swipeone/new", label: "Create Campaign", icon: Globe, exact: true },
+  { href: "/sequences", label: "Email Sequence", icon: Mails },
   { href: "/templates", label: "Templates", icon: FileText },
   { href: "/templates/dynamic", label: "Dynamic Templates", icon: Sparkles, exact: true },
+  { href: "/templates/sequence", label: "Sequence Templates", icon: Layers, exact: true },
 ];
 
 function NavContent({
@@ -174,7 +179,19 @@ function NavContent({
         )}
       </nav>
 
-      <div className="p-4">
+      <div className="p-4 space-y-1">
+        <Link
+          href="/feedback"
+          className={cn(
+            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+            pathname === "/feedback" || pathname.startsWith("/feedback/")
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          )}
+        >
+          <MessageSquareWarning className="h-4 w-4" />
+          Bug report &amp; Feature request
+        </Link>
         <ThemeToggle />
       </div>
 
