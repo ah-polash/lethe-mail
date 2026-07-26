@@ -57,7 +57,10 @@ export async function requireSuperAdmin(): Promise<AuthUser> {
   return session;
 }
 
-export async function loginUser(email: string, password: string): Promise<{ token: string; user: AuthUser } | null> {
+export async function loginUser(
+  email: string,
+  password: string
+): Promise<{ token: string; user: AuthUser; mustChangePassword: boolean } | null> {
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) return null;
 
@@ -71,5 +74,9 @@ export async function loginUser(email: string, password: string): Promise<{ toke
     role: user.role as UserRole,
   };
 
-  return { token: createToken(authUser), user: authUser };
+  return {
+    token: createToken(authUser),
+    user: authUser,
+    mustChangePassword: user.mustChangePassword,
+  };
 }

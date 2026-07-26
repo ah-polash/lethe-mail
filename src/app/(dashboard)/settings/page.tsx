@@ -280,6 +280,25 @@ export default function SettingsPage() {
   // Users
   const [users, setUsers] = useState<User[]>([]);
   const [userDialogOpen, setUserDialogOpen] = useState(false);
+
+  // Bulk user creation
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [bulkEmails, setBulkEmails] = useState("");
+  const [bulkRole, setBulkRole] = useState("general_user");
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkResults, setBulkResults] = useState<
+    | {
+        summary: { created: number; emailed: number; skipped: number; invalid: number };
+        results: {
+          email: string;
+          status: string;
+          emailSent: boolean;
+          tempPassword?: string;
+          emailError?: string;
+        }[];
+      }
+    | null
+  >(null);
   const [newUser, setNewUser] = useState({
     name: "",
     email: "",
@@ -1335,6 +1354,41 @@ export default function SettingsPage() {
   };
 
   // --- User Handlers ---
+
+  const handleBulkCreate = async () => {
+    if (!bulkEmails.trim()) {
+      toast.error("Paste at least one email address");
+      return;
+    }
+    setBulkRunning(true);
+    setBulkResults(null);
+    try {
+      const res = await fetch("/api/users/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emails: bulkEmails, role: bulkRole }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Bulk create failed");
+      setBulkResults(data);
+      const { created, emailed, skipped, invalid } = data.summary;
+      toast.success(
+        `Created ${created} user${created === 1 ? "" : "s"} (${emailed} emailed` +
+          (skipped ? `, ${skipped} already existed` : "") +
+          (invalid ? `, ${invalid} invalid` : "") +
+          ")"
+      );
+      // refresh users table
+      fetch("/api/users")
+        .then((r) => r.json())
+        .then((d) => setUsers(d.users || []))
+        .catch(() => {});
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Bulk create failed");
+    } finally {
+      setBulkRunning(false);
+    }
+  };
 
   const handleCreateUser = async () => {
     if (!newUser.name || !newUser.email || !newUser.password) {
@@ -2907,6 +2961,96 @@ export default function SettingsPage() {
                     Manage platform users and roles
                   </CardDescription>
                 </div>
+                <div className="flex gap-2">
+                <Dialog
+                  open={bulkDialogOpen}
+                  onOpenChange={(o) => {
+                    setBulkDialogOpen(o);
+                    if (!o) {
+                      setBulkResults(null);
+                      setBulkEmails("");
+                    }
+                  }}
+                >
+                  <DialogTrigger render={<Button variant="outline" />}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Bulk Create Users
+                  </DialogTrigger>
+                  <DialogContent className="max-w-xl">
+                    <DialogHeader>
+                      <DialogTitle>Bulk create users</DialogTitle>
+                      <DialogDescription>
+                        Paste comma-separated email addresses. Each user gets a random temporary
+                        password by email and must set their own password on first login.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 mt-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="bulk-emails">Email addresses</Label>
+                        <Textarea
+                          id="bulk-emails"
+                          rows={5}
+                          placeholder="jane@example.com, john@example.com, sam@example.com"
+                          value={bulkEmails}
+                          onChange={(e) => setBulkEmails(e.target.value)}
+                          disabled={bulkRunning}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Commas, spaces, or new lines all work as separators. Duplicates and
+                          existing accounts are skipped automatically. Max 100 per batch.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Role for all created users</Label>
+                        <Select value={bulkRole} onValueChange={(v) => v && setBulkRole(v)}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="general_user">General User</SelectItem>
+                            <SelectItem value="super_admin">Super Admin</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {bulkResults && (
+                        <div className="rounded-md border bg-muted/30 p-3 space-y-1.5 max-h-56 overflow-y-auto">
+                          <p className="text-xs font-medium">
+                            {bulkResults.summary.created} created · {bulkResults.summary.emailed}{" "}
+                            emailed · {bulkResults.summary.skipped} skipped ·{" "}
+                            {bulkResults.summary.invalid} invalid
+                          </p>
+                          {bulkResults.results.map((r) => (
+                            <div key={r.email} className="flex items-center gap-2 text-xs">
+                              <span className="truncate">{r.email}</span>
+                              {r.status === "created" && r.emailSent && (
+                                <span className="text-green-600 dark:text-green-400 shrink-0">✓ emailed</span>
+                              )}
+                              {r.status === "created" && !r.emailSent && (
+                                <span className="text-amber-600 dark:text-amber-400 shrink-0" title={r.emailError}>
+                                  created, email failed — password:{" "}
+                                  <code className="font-mono">{r.tempPassword}</code>
+                                </span>
+                              )}
+                              {r.status === "skipped_exists" && (
+                                <span className="text-muted-foreground shrink-0">already exists</span>
+                              )}
+                              {r.status === "invalid" && (
+                                <span className="text-destructive shrink-0">invalid email</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <Button onClick={handleBulkCreate} disabled={bulkRunning} className="w-full">
+                        {bulkRunning
+                          ? "Creating & emailing…"
+                          : "Bulk create users & email random passwords"}
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
                 <Dialog open={userDialogOpen} onOpenChange={setUserDialogOpen}>
                   <DialogTrigger render={<Button />}>
                     <Plus className="mr-2 h-4 w-4" />
@@ -2968,6 +3112,7 @@ export default function SettingsPage() {
                     </div>
                   </DialogContent>
                 </Dialog>
+                </div>
               </div>
             </CardHeader>
             <CardContent>

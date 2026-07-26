@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { fireSequenceStep } from "@/lib/sequence";
+import { fireSequenceStep, tokensMatch } from "@/lib/sequence";
 
 // Public webhook fired by external systems (e.g. a WordPress plugin).
 //
@@ -26,13 +26,13 @@ export async function POST(
     where: { id: sequenceId },
     select: { webhookToken: true, status: true },
   });
-  if (!sequence) {
-    return NextResponse.json({ error: "Sequence not found" }, { status: 404 });
-  }
 
   const token =
     request.nextUrl.searchParams.get("token") || request.headers.get("x-webhook-token") || "";
-  if (token !== sequence.webhookToken) {
+
+  // Same 401 whether the sequence is missing or the token is wrong, so an
+  // unauthenticated caller can't enumerate which sequence ids exist.
+  if (!sequence || !tokensMatch(token, sequence.webhookToken)) {
     return NextResponse.json({ error: "Invalid or missing token" }, { status: 401 });
   }
 

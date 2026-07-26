@@ -947,8 +947,16 @@ export default function SequenceEditorPage() {
     }
   }, [testPayload]);
 
+  // Plain substitution for subject-like fields.
   const resolveTags = useCallback(
     (template: string): string => resolveMergeTags(template, parsedPayload.data || {}),
+    [parsedPayload]
+  );
+
+  // HTML-escaped substitution — mirrors what the send path does, so the preview
+  // matches the email that actually goes out.
+  const resolveTagsHtml = useCallback(
+    (template: string): string => resolveMergeTags(template, parsedPayload.data || {}, { html: true }),
     [parsedPayload]
   );
 
@@ -1628,10 +1636,11 @@ export default function SequenceEditorPage() {
                     <div className="rounded-lg border overflow-hidden bg-white">
                       <iframe
                         title="preview"
+                        sandbox=""
                         className="w-full h-[520px] bg-white"
                         srcDoc={
                           draft.htmlContent
-                            ? resolveTags(draft.htmlContent)
+                            ? resolveTagsHtml(draft.htmlContent)
                             : "<p style='font-family:sans-serif;color:#888;padding:24px'>Empty — generate or paste HTML.</p>"
                         }
                       />

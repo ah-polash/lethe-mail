@@ -7,7 +7,6 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -231,9 +230,15 @@ export default function SequenceTemplatesPage() {
                 title="Click to preview"
               >
                 {t.htmlContent ? (
-                  <div
-                    className="transform scale-[0.25] origin-top-left w-[400%] h-[400%] pointer-events-none"
-                    dangerouslySetInnerHTML={{ __html: t.htmlContent }}
+                  // sandbox (no allow-scripts) so stored template HTML can never
+                  // execute JS in the viewer's session — templates are
+                  // user-generated content.
+                  <iframe
+                    title={t.name}
+                    sandbox=""
+                    tabIndex={-1}
+                    srcDoc={t.htmlContent}
+                    className="transform scale-[0.25] origin-top-left w-[400%] h-[400%] pointer-events-none border-0 bg-white"
                   />
                 ) : (
                   <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
@@ -340,12 +345,15 @@ export default function SequenceTemplatesPage() {
               {previewTemplate?.stepNumber != null ? ` · Step ${previewTemplate.stepNumber}` : ""}
             </DialogDescription>
           </DialogHeader>
-          <ScrollArea className="h-[68vh] border bg-white">
-            <div
-              className="max-w-[600px] mx-auto p-4"
-              dangerouslySetInnerHTML={{ __html: previewTemplate?.htmlContent || "" }}
+          <div className="h-[68vh] border bg-white">
+            {/* sandboxed: template HTML is untrusted content, never run its JS */}
+            <iframe
+              title={previewTemplate?.name || "Preview"}
+              sandbox=""
+              srcDoc={previewTemplate?.htmlContent || ""}
+              className="w-full h-full border-0 bg-white"
             />
-          </ScrollArea>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+import { KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
@@ -11,42 +13,39 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { toast } from "sonner";
 
-export default function LoginPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
+export default function ChangePasswordPage() {
   const router = useRouter();
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!email || !password) {
-      toast.error("Please fill in all fields");
+    if (password.length < 8) {
+      toast.error("Password must be at least 8 characters");
       return;
     }
-
+    if (password !== confirm) {
+      toast.error("Passwords do not match");
+      return;
+    }
     setLoading(true);
     try {
-      const res = await fetch("/api/auth", {
+      const res = await fetch("/api/auth/change-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ password }),
       });
-
       const data = await res.json();
-
       if (!res.ok) {
-        toast.error(data.error || "Invalid credentials");
+        toast.error(data.error || "Could not update password");
         return;
       }
-
-      toast.success("Logged in successfully");
-      router.push(data.mustChangePassword ? "/change-password" : "/dashboard");
+      toast.success("Password updated — welcome!");
+      router.push("/dashboard");
     } catch {
       toast.error("Something went wrong");
     } finally {
@@ -62,39 +61,42 @@ export default function LoginPage() {
 
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle className="text-3xl font-bold tracking-tight">
-            bPlugins
+          <CardTitle className="text-2xl font-bold tracking-tight flex items-center justify-center gap-2">
+            <KeyRound className="h-5 w-5" /> Set your new password
           </CardTitle>
           <CardDescription>
-            Sign in to your email marketing platform
+            For your security, you must choose your own password before continuing.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="new-password">New password</Label>
               <Input
-                id="email"
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="new-password"
+                type="password"
+                placeholder="At least 8 characters"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                minLength={8}
                 required
+                autoFocus
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="confirm-password">Confirm password</Label>
               <Input
-                id="password"
+                id="confirm-password"
                 type="password"
-                placeholder="Enter your password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Repeat the password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                minLength={8}
                 required
               />
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Signing in..." : "Sign In"}
+              {loading ? "Saving..." : "Save & Continue"}
             </Button>
           </form>
         </CardContent>

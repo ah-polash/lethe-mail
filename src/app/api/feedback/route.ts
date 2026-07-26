@@ -16,7 +16,7 @@ export async function GET() {
     const reports = await prisma.feedbackReport.findMany({
       orderBy: { createdAt: "desc" },
       take: 200,
-      include: { creator: { select: { name: true } } },
+      include: { creator: { select: { name: true, email: true } } },
     });
     return NextResponse.json({ reports });
   } catch (error) {
@@ -35,15 +35,27 @@ export async function POST(request: NextRequest) {
     if (!title) return NextResponse.json({ error: "Title is required" }, { status: 400 });
     if (!description) return NextResponse.json({ error: "Description is required" }, { status: 400 });
 
+    // Only accept an http(s) URL for the screenshot — it is rendered as an
+    // <img src> / link target, so a javascript:/data: URL would be an XSS vector.
+    let screenshotUrl: string | null = null;
+    if (typeof body.screenshotUrl === "string" && body.screenshotUrl.trim()) {
+      const candidate = body.screenshotUrl.trim();
+      try {
+        const parsed = new URL(candidate);
+        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+          screenshotUrl = parsed.toString();
+        }
+      } catch {
+        // not a valid absolute URL — drop it
+      }
+    }
+
     const report = await prisma.feedbackReport.create({
       data: {
         type: body.type === "feature" ? "feature" : "bug",
-        title,
-        description,
-        screenshotUrl:
-          typeof body.screenshotUrl === "string" && body.screenshotUrl.trim()
-            ? body.screenshotUrl.trim()
-            : null,
+        title: title.slice(0, 300),
+        description: description.slice(0, 10000),
+        screenshotUrl,
         createdBy: session.id,
       },
     });

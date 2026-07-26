@@ -18,6 +18,7 @@ import {
   Mails,
   Layers,
   MessageSquareWarning,
+  Megaphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -192,7 +193,18 @@ function NavContent({
           <MessageSquareWarning className="h-4 w-4" />
           Bug report &amp; Feature request
         </Link>
-        <ThemeToggle />
+        <Link
+          href="/whats-new"
+          className={cn(
+            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+            pathname === "/whats-new" || pathname.startsWith("/whats-new/")
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          )}
+        >
+          <Megaphone className="h-4 w-4" />
+          What&apos;s New
+        </Link>
       </div>
 
       <Separator />
@@ -215,6 +227,7 @@ function NavContent({
                 {user.role === "super_admin" ? "Admin" : "User"}
               </Badge>
             </div>
+            <ThemeToggle />
           </div>
           <Button
             variant="outline"
@@ -247,6 +260,11 @@ export function Sidebar() {
           return;
         }
         const data = await res.json();
+        // Bulk-created users must set their own password before using the app.
+        if (data.user?.mustChangePassword) {
+          router.push("/change-password");
+          return;
+        }
         setUser(data.user);
       } catch {
         router.push("/login");

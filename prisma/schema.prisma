@@ -13,6 +13,7 @@ model User {
   name           String
   passwordHash   String
   role           String   @default("general_user") // super_admin | general_user
+  mustChangePassword Boolean @default(false) // bulk-created users must set their own password on first login
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -23,6 +24,35 @@ model User {
   emailSequences    EmailSequence[]
   sequenceTemplates SequenceTemplate[]
   feedbackReports   FeedbackReport[]
+  featureAnnouncements FeatureAnnouncement[]
+  featureReactions     FeatureReaction[]
+}
+
+// "What's New" announcements — upcoming/shipped features posted by super
+// admins; any user can react with one of 5 emoji (toggle, one per emoji/user).
+model FeatureAnnouncement {
+  id          String   @id @default(uuid())
+  title       String
+  description String
+  status      String   @default("upcoming") // upcoming | shipped
+  createdBy   String
+  creator     User     @relation(fields: [createdBy], references: [id])
+  reactions   FeatureReaction[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model FeatureReaction {
+  id        String   @id @default(uuid())
+  featureId String
+  feature   FeatureAnnouncement @relation(fields: [featureId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  emoji     String   // one of the 5 allowed reactions
+  createdAt DateTime @default(now())
+
+  @@unique([featureId, userId, emoji])
+  @@index([featureId])
 }
 
 // Bug reports & feature requests submitted from the sidebar. Any authenticated

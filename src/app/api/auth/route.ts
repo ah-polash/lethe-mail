@@ -20,7 +20,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const response = NextResponse.json({ user: result.user });
+    const response = NextResponse.json({
+      user: result.user,
+      mustChangePassword: result.mustChangePassword,
+    });
     response.cookies.set("auth-token", result.token, {
       httpOnly: true,
       sameSite: "lax",

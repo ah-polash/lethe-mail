@@ -1,8 +1,18 @@
+import crypto from "node:crypto";
 import { prisma } from "@/lib/db";
 import { sendEmail } from "@/lib/ses";
 import { getByPath, resolveMergeTags } from "@/lib/merge";
 
 export { getByPath, resolveMergeTags };
+
+// Constant-time token comparison — avoids leaking the token via response
+// timing, and avoids short-circuiting on the first differing byte.
+export function tokensMatch(provided: string, expected: string): boolean {
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
 
 export function getBaseUrl(): string {
   return (
@@ -107,9 +117,14 @@ export async function fireSequenceStep(
   const baseUrl = getBaseUrl();
   const unsubscribeUrl = `${baseUrl}/unsubscribe?email=${encodeURIComponent(email)}`;
 
-  const subject = resolveMergeTags(step.subject, payload);
-  const htmlBody = resolveMergeTags(step.htmlContent, payload);
-  const fromName = resolveMergeTags(step.sequence.fromName || "bPlugins", payload).trim() || "bPlugins";
+  // Payload values are untrusted (anyone with the webhook token supplies them):
+  // escape them inside the HTML body, and strip CR/LF from the header-ish
+  // fields (subject, from name) to rule out header injection.
+  const stripCrlf = (s: string) => s.replace(/[\r\n]+/g, " ").trim();
+  const subject = stripCrlf(resolveMergeTags(step.subject, payload));
+  const htmlBody = resolveMergeTags(step.htmlContent, payload, { html: true });
+  const fromName =
+    stripCrlf(resolveMergeTags(step.sequence.fromName || "bPlugins", payload)) || "bPlugins";
 
   const result = await sendEmail({
     to: [email],

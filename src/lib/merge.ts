@@ -26,15 +26,34 @@ function stringifyValue(v: unknown): string {
   return String(v);
 }
 
+export function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 // Replace {{path}} tokens (dot-paths allowed) with values from `data`.
-export function resolveMergeTags(template: string, data: Record<string, unknown>): string {
+//
+// Webhook payloads are supplied by whoever holds the sequence token, so values
+// are untrusted: when substituting into an HTML body pass { html: true } to
+// escape them, otherwise a caller could inject markup/links into an email sent
+// from your verified domain.
+export function resolveMergeTags(
+  template: string,
+  data: Record<string, unknown>,
+  opts: { html?: boolean } = {}
+): string {
   return template.replace(/\{\{([\w.]+)\}\}/g, (_match, key: string) => {
     // Prefer an exact flat key first (handles keys that literally contain dots),
     // then fall back to nested dot-path lookup.
     const flat = Object.prototype.hasOwnProperty.call(data, key)
       ? (data as Record<string, unknown>)[key]
       : getByPath(data, key);
-    return stringifyValue(flat);
+    const value = stringifyValue(flat);
+    return opts.html ? escapeHtml(value) : value;
   });
 }
 

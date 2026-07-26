@@ -36,8 +36,9 @@ function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: strin
 export function PlaceholderShortcut() {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      // Cmd+Shift+P (Mac) / Ctrl+Shift+P (others).
-      if (e.key.toLowerCase() !== "p") return;
+      // Cmd+Shift+P (Mac) / Ctrl+Shift+P (others). `e.key` can be undefined for
+      // synthetic events (autofill, IME, password managers) — bail out safely.
+      if (typeof e.key !== "string" || e.key.toLowerCase() !== "p") return;
       if (!e.shiftKey) return;
       if (!(e.metaKey || e.ctrlKey)) return;
 
