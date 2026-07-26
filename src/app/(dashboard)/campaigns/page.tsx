@@ -90,6 +90,7 @@ function isoToLocalInput(iso: string): string {
 
 const statusVariant: Record<string, "secondary" | "outline" | "default" | "destructive"> = {
   draft: "secondary",
+  pending_review: "outline",
   scheduled: "outline",
   sending: "outline",
   sent: "default",
@@ -97,6 +98,7 @@ const statusVariant: Record<string, "secondary" | "outline" | "default" | "destr
 };
 
 const statusColors: Record<string, string> = {
+  pending_review: "border-amber-500 text-amber-600 dark:text-amber-400",
   scheduled: "border-blue-500 text-blue-600 dark:text-blue-400",
   sending: "border-yellow-500 text-yellow-600 dark:text-yellow-400",
   sent: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
@@ -129,6 +131,9 @@ export default function CampaignsPage() {
   const router = useRouter();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
+  // Campaign management is admin-only; general users submit campaigns from the
+  // builder and never see the campaign list.
+  const [allowed, setAllowed] = useState<boolean | null>(null);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [resumingId, setResumingId] = useState<string | null>(null);
 
@@ -204,8 +209,26 @@ export default function CampaignsPage() {
   };
 
   useEffect(() => {
-    fetchCampaigns();
-  }, []);
+    let active = true;
+    fetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!active) return;
+        if (d.user?.role === "super_admin") {
+          setAllowed(true);
+          fetchCampaigns();
+        } else {
+          setAllowed(false);
+          router.replace("/campaigns/swipeone/new");
+        }
+      })
+      .catch(() => {
+        if (active) setAllowed(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [router]);
 
   const openReschedule = (campaign: Campaign) => {
     setRescheduleCampaign(campaign);
@@ -372,6 +395,16 @@ export default function CampaignsPage() {
     }
   };
 
+  // Don't flash campaign data to a non-admin while the role check resolves.
+  if (allowed !== true) {
+    return (
+      <div className="flex items-center justify-center py-24 text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin mr-2" />
+        {allowed === false ? "Redirecting…" : "Loading…"}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -431,7 +464,9 @@ export default function CampaignsPage() {
                           variant={statusVariant[campaign.status] || "secondary"}
                           className={statusColors[campaign.status] || ""}
                         >
-                          {campaign.status}
+                          {campaign.status === "pending_review"
+                            ? "pending review"
+                            : campaign.status}
                         </Badge>
                         {campaign.status === "scheduled" && campaign.scheduledAt && (
                           <span className="text-[10px] text-muted-foreground whitespace-nowrap">

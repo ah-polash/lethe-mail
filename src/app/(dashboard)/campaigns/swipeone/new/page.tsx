@@ -429,6 +429,8 @@ export function SwipeOneCampaignEditor({
 
   // User role
   const [userRole, setUserRole] = useState<string>("");
+  const isSuperAdmin = userRole === "super_admin";
+  const [submitting, setSubmitting] = useState(false);
 
   const loadSegments = useCallback(async () => {
     setSegmentsLoading(true);
@@ -2223,6 +2225,40 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
       }
     } finally {
       setSaving(false);
+    }
+  };
+
+  // General users don't send: they save the campaign and hand it to an admin,
+  // who fills in the campaign details + segments and sends it.
+  const handleSubmitToAdmin = async () => {
+    if (!name) {
+      toast.error("Campaign name is required");
+      return;
+    }
+    if (!htmlContent) {
+      toast.error("Email content is required");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const id = await persistCampaign();
+      if (!id) return;
+      const res = await fetch(`/api/campaigns/${id}/submit`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Could not submit campaign");
+        return;
+      }
+      if (data.emailError) {
+        toast.warning("Campaign submitted, but the admin notification email failed to send.");
+      } else {
+        toast.success("Submitted for admin review — an admin has been notified.");
+      }
+      router.push(`/campaigns/swipeone/${id}`);
+    } catch {
+      toast.error("Could not submit campaign");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -6211,7 +6247,9 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
           </Dialog>
         </section>
 
-        {/* Section: Details */}
+        {/* Section: Details — admin-only; an admin completes these before sending
+            a campaign submitted by a general user. */}
+        {isSuperAdmin && (
         <section className="space-y-4">
           <div>
             <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
@@ -6308,8 +6346,10 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
             </div>
           </div>
         </section>
+        )}
 
-        {/* Section: SwipeOne Segments */}
+        {/* Section: SwipeOne Segments — admin-only (audience is chosen at review time) */}
+        {isSuperAdmin && (
         <section className="space-y-3">
           <div>
             <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
@@ -6372,6 +6412,7 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
             </ScrollArea>
           )}
         </section>
+        )}
 
         {/* Section: Available Variables */}
         <section className="space-y-3">
@@ -6565,13 +6606,29 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
         >
           {saving ? "Saving..." : "Save Draft"}
         </Button>
-        {userRole === "super_admin" && (
+        {isSuperAdmin ? (
           <Button size="sm" className="h-9" onClick={handleSendNow} disabled={sending}>
             {sending
               ? sendProgress && sendProgress.total > 0
                 ? `Sending ${sendProgress.sent + sendProgress.failed}/${sendProgress.total}...`
                 : "Sending..."
               : "Send Now"}
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            className="h-9"
+            onClick={handleSubmitToAdmin}
+            disabled={submitting || saving}
+          >
+            {submitting ? (
+              <>
+                <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                Submitting...
+              </>
+            ) : (
+              "Submit this campaign to the admin"
+            )}
           </Button>
         )}
       </div>

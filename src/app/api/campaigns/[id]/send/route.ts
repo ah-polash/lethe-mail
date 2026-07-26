@@ -22,7 +22,14 @@ export async function POST(
     // sending/sent/failed (idempotent resume — only emails without a successful
     // "sent" event are re-attempted). This is what powers "Send to Failed
     // Contacts" and recovery from serverless timeouts mid-bulk-send.
-    const RESUMABLE_STATUSES = new Set(["draft", "scheduled", "sending", "sent", "failed"]);
+    const RESUMABLE_STATUSES = new Set([
+      "draft",
+      "pending_review", // submitted by a general user, admin completes + sends
+      "scheduled",
+      "sending",
+      "sent",
+      "failed",
+    ]);
     if (!RESUMABLE_STATUSES.has(campaign.status)) {
       return NextResponse.json(
         { error: `Campaign cannot be sent from status "${campaign.status}"` },

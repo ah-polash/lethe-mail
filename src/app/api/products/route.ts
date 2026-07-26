@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSuperAdmin } from "@/lib/auth";
+import { requireAuth, requireSuperAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
 function handleError(error: unknown) {
@@ -9,10 +9,12 @@ function handleError(error: unknown) {
   return NextResponse.json({ error: message }, { status: 500 });
 }
 
-// GET: List all products
+// GET: List all products. Any authenticated user — general users need this for
+// the product quick-fill dropdown in the campaign builder. Creating/editing
+// products stays super-admin only.
 export async function GET() {
   try {
-    await requireSuperAdmin();
+    await requireAuth();
     const products = await prisma.product.findMany({ orderBy: { createdAt: "asc" } });
     return NextResponse.json({ products });
   } catch (error) {

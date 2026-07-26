@@ -52,9 +52,15 @@ const DEFAULT_BRAND: Brand = {
   logoUrl: "",
 };
 
-const navLinks: { href: string; label: string; icon: typeof LayoutDashboard; exact?: boolean }[] = [
+const navLinks: {
+  href: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  exact?: boolean;
+  adminOnly?: boolean;
+}[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/campaigns", label: "Campaigns", icon: Send },
+  { href: "/campaigns", label: "Campaigns", icon: Send, adminOnly: true },
   { href: "/campaigns/swipeone/new", label: "Create Campaign", icon: Globe, exact: true },
   { href: "/sequences", label: "Email Sequence", icon: Mails },
   { href: "/templates", label: "Templates", icon: FileText },
@@ -96,6 +102,7 @@ function NavContent({
 
       <nav className="flex-1 space-y-1 p-4">
         {navLinks.map((link) => {
+          if (link.adminOnly && user?.role !== "super_admin") return null;
           const Icon = link.icon;
           // If a more-specific link in the list matches the current path, this link is not active.
           const moreSpecific = navLinks.some(
