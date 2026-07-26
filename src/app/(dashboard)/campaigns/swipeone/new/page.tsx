@@ -33,6 +33,7 @@ import {
 import {
   ArrowLeft,
   Loader2,
+  ScrollText,
   Globe,
   CalendarClock,
   Sparkles,
@@ -50,6 +51,9 @@ import {
   Trash2,
   Upload,
   X,
+  Search,
+  ChevronUp,
+  ChevronDown,
   Code,
   Blocks,
   Eye,
@@ -69,6 +73,108 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+
+// --- Preview → source mapping -------------------------------------------------
+// Maps the *rendered* text of the preview back to character offsets in the raw
+// HTML, so double-clicking a word in the preview can highlight it in the editor.
+// Text outside tags is collected with whitespace collapsed (mirroring how the
+// browser renders it) while remembering each character's index in the source.
+function buildTextIndex(html: string): { text: string; map: number[] } {
+  const chars: string[] = [];
+  const map: number[] = [];
+  let inTag = false;
+  let skipUntil: string | null = null; // skip <script>/<style> bodies
+
+  for (let i = 0; i < html.length; i++) {
+    const ch = html[i];
+
+    if (skipUntil) {
+      if (html.startsWith(skipUntil, i)) {
+        i += skipUntil.length - 1;
+        skipUntil = null;
+      }
+      continue;
+    }
+    if (ch === "<") {
+      const rest = html.slice(i, i + 8).toLowerCase();
+      if (rest.startsWith("<script")) skipUntil = "</script>";
+      else if (rest.startsWith("<style")) skipUntil = "</style>";
+      inTag = true;
+      continue;
+    }
+    if (ch === ">") {
+      inTag = false;
+      continue;
+    }
+    if (inTag) continue;
+
+    if (/\s/.test(ch)) {
+      if (chars.length > 0 && chars[chars.length - 1] !== " ") {
+        chars.push(" ");
+        map.push(i);
+      }
+      continue;
+    }
+    chars.push(ch);
+    map.push(i);
+  }
+  return { text: chars.join(""), map };
+}
+
+function normalizeText(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+// Scroll a textarea so the character at `index` is comfortably in view.
+// Counting "\n" isn't enough because the editor soft-wraps long lines, so the
+// position is measured with a hidden mirror div that reproduces the textarea's
+// exact typography, width and wrapping.
+function scrollTextareaToOffset(ta: HTMLTextAreaElement, index: number) {
+  const style = getComputedStyle(ta);
+  const mirror = document.createElement("div");
+  const copy = [
+    "box-sizing", "width", "padding-top", "padding-right", "padding-bottom", "padding-left",
+    "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
+    "font-style", "font-variant", "font-weight", "font-stretch", "font-size", "font-family",
+    "line-height", "letter-spacing", "word-spacing", "text-transform", "tab-size",
+  ];
+  for (const prop of copy) {
+    mirror.style.setProperty(prop, style.getPropertyValue(prop));
+  }
+  mirror.style.position = "absolute";
+  mirror.style.top = "0";
+  mirror.style.left = "-9999px";
+  mirror.style.visibility = "hidden";
+  mirror.style.height = "auto";
+  mirror.style.whiteSpace = "pre-wrap";
+  mirror.style.overflowWrap = "break-word";
+  mirror.style.wordWrap = "break-word";
+
+  mirror.textContent = ta.value.slice(0, index);
+  const marker = document.createElement("span");
+  marker.textContent = ta.value.slice(index, index + 1) || ".";
+  mirror.appendChild(marker);
+  document.body.appendChild(mirror);
+  const top = marker.offsetTop;
+  const height = marker.offsetHeight || 16;
+  document.body.removeChild(mirror);
+
+  // Only scroll when the match sits outside the visible band (with a margin),
+  // then centre it so there's context above and below.
+  const margin = 24;
+  const viewTop = ta.scrollTop;
+  const viewBottom = viewTop + ta.clientHeight;
+  if (top < viewTop + margin || top + height > viewBottom - margin) {
+    ta.scrollTop = Math.max(0, top - ta.clientHeight / 2 + height / 2);
+  }
+
+  // The editor itself may be off-screen (long page) — bring it into the window.
+  const rect = ta.getBoundingClientRect();
+  const vh = window.innerHeight || document.documentElement.clientHeight;
+  if (rect.bottom < 80 || rect.top > vh - 80) {
+    ta.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+}
 
 interface SavedPrompt {
   id: string;
@@ -245,6 +351,15 @@ export function SwipeOneCampaignEditor({
   // Smart map-variables modal (large)
   const [mapVarsOpen, setMapVarsOpen] = useState(false);
   const codeTextareaRef = useRef<HTMLTextAreaElement>(null);
+  // Main HTML editor (left pane) — target for "double-click preview → highlight source".
+  const mainCodeRef = useRef<HTMLTextAreaElement>(null);
+
+  // Search in code
+  const [codeSearchOpen, setCodeSearchOpen] = useState(false);
+  const [codeSearchQuery, setCodeSearchQuery] = useState("");
+  const [codeMatches, setCodeMatches] = useState<number[]>([]);
+  const [codeMatchIdx, setCodeMatchIdx] = useState(0);
+  const codeSearchInputRef = useRef<HTMLInputElement>(null);
   const [codePos, setCodePos] = useState<{ start: number; end: number; text: string }>({
     start: 0,
     end: 0,
@@ -431,6 +546,9 @@ export function SwipeOneCampaignEditor({
   const [userRole, setUserRole] = useState<string>("");
   const isSuperAdmin = userRole === "super_admin";
   const [submitting, setSubmitting] = useState(false);
+
+  // Note the submitting user leaves for the reviewing admin.
+  const [reviewNote, setReviewNote] = useState("");
 
   const loadSegments = useCallback(async () => {
     setSegmentsLoading(true);
@@ -637,6 +755,9 @@ export function SwipeOneCampaignEditor({
         if (typeof c.fromName === "string") setFromName(c.fromName);
         if (typeof c.categoryId === "string" || c.categoryId === null) {
           setCategoryId(c.categoryId || "");
+        }
+        if (typeof c.reviewNote === "string" || c.reviewNote === null) {
+          setReviewNote(c.reviewNote || "");
         }
 
         if (typeof c.htmlContent === "string" && c.htmlContent.trim()) {
@@ -1849,11 +1970,135 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
     }
   }, [htmlContent, mappedHtml, isHtmlMode, showHtmlPreview]);
 
+  // Double-click any text/element in the preview → select the matching HTML in
+  // the code editor. Re-attached whenever the preview document is rewritten.
+  useEffect(() => {
+    if (!isHtmlMode || !showHtmlPreview) return;
+    const iframe = previewIframeRef.current;
+    const doc = iframe?.contentDocument;
+    const win = iframe?.contentWindow;
+    if (!doc || !win) return;
+
+    function selectInSource(start: number, end: number) {
+      const ta = mainCodeRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.setSelectionRange(start, end);
+      scrollTextareaToOffset(ta, start);
+    }
+
+    function onDblClick(e: MouseEvent) {
+      const source = htmlContent;
+      if (!source) return;
+
+      const sel = win!.getSelection();
+      const word = sel?.toString().trim() ?? "";
+      const node = sel?.anchorNode ?? null;
+
+      // 1) Text: locate the clicked word using its text node as context, so we
+      //    hit the right occurrence when the same word appears several times.
+      if (word && node && node.nodeType === Node.TEXT_NODE) {
+        const { text, map } = buildTextIndex(source);
+        const nodeText = normalizeText(node.nodeValue || "");
+        const wordNorm = normalizeText(word);
+        const base = nodeText ? text.indexOf(nodeText) : -1;
+
+        let normStart = -1;
+        if (base >= 0) {
+          // Offset of the double-clicked word inside its own text node.
+          const beforeInNode = normalizeText((node.nodeValue || "").slice(0, sel?.anchorOffset ?? 0));
+          const within = nodeText.indexOf(wordNorm, Math.max(0, beforeInNode.length - wordNorm.length));
+          normStart = within >= 0 ? base + within : base + nodeText.indexOf(wordNorm);
+        } else {
+          normStart = text.indexOf(wordNorm);
+        }
+
+        if (normStart >= 0 && normStart < map.length) {
+          const endIdx = Math.min(normStart + wordNorm.length - 1, map.length - 1);
+          selectInSource(map[normStart], map[endIdx] + 1);
+          return;
+        }
+      }
+
+      // 2) No text (images, buttons, spacers): match the element by a
+      //    distinctive attribute, then select its whole opening tag.
+      const el = e.target as HTMLElement | null;
+      if (el) {
+        const attr =
+          el.getAttribute("src") || el.getAttribute("href") || el.getAttribute("alt") || "";
+        const at = attr ? source.indexOf(attr) : -1;
+        if (at >= 0) {
+          const tagStart = source.lastIndexOf("<", at);
+          const tagEnd = source.indexOf(">", at);
+          if (tagStart >= 0 && tagEnd > tagStart) {
+            selectInSource(tagStart, tagEnd + 1);
+            return;
+          }
+        }
+      }
+
+      toast.info("Couldn't locate that in the HTML — try double-clicking a word of text.");
+    }
+
+    doc.addEventListener("dblclick", onDblClick);
+    return () => doc.removeEventListener("dblclick", onDblClick);
+  }, [htmlContent, mappedHtml, isHtmlMode, showHtmlPreview]);
+
   // If the user edits HTML, drop the mapped preview so it doesn't go stale.
   useEffect(() => {
     if (mappedHtml !== null) setMappedHtml(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [htmlContent]);
+
+  // --- Search in code ---------------------------------------------------------
+  // Case-insensitive scan of the HTML source; matches are highlighted in the
+  // editor one at a time and scrolled into view (wrap-aware).
+  const runCodeSearch = (query: string, jumpTo = 0) => {
+    const q = query.trim();
+    if (!q) {
+      setCodeMatches([]);
+      setCodeMatchIdx(0);
+      return;
+    }
+    const hay = htmlContent.toLowerCase();
+    const needle = q.toLowerCase();
+    const found: number[] = [];
+    let at = hay.indexOf(needle);
+    while (at !== -1) {
+      found.push(at);
+      at = hay.indexOf(needle, at + needle.length);
+    }
+    setCodeMatches(found);
+    if (found.length === 0) {
+      setCodeMatchIdx(0);
+      return;
+    }
+    const idx = ((jumpTo % found.length) + found.length) % found.length;
+    setCodeMatchIdx(idx);
+    const ta = mainCodeRef.current;
+    if (ta) {
+      ta.focus();
+      ta.setSelectionRange(found[idx], found[idx] + q.length);
+      scrollTextareaToOffset(ta, found[idx]);
+    }
+  };
+
+  const stepCodeMatch = (delta: number) => {
+    if (codeMatches.length === 0) {
+      runCodeSearch(codeSearchQuery, 0);
+      return;
+    }
+    runCodeSearch(codeSearchQuery, codeMatchIdx + delta);
+  };
+
+  const openCodeSearch = () => {
+    setCodeSearchOpen(true);
+    // Seed with the current editor selection, like a normal find bar.
+    const ta = mainCodeRef.current;
+    const sel = ta ? ta.value.slice(ta.selectionStart, ta.selectionEnd) : "";
+    if (sel && sel.length <= 80) setCodeSearchQuery(sel);
+    setTimeout(() => codeSearchInputRef.current?.select(), 30);
+  };
 
   const formatHtml = () => {
     if (!htmlContent.trim()) {
@@ -2199,6 +2444,7 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
         segmentNames: selectedSegmentNames,
         audienceSource: "swipeone",
         categoryId: categoryId || null,
+        reviewNote,
         ...(existingCampaignId ? {} : { status: "draft" }),
       }),
     });
@@ -5551,6 +5797,21 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
                     </Button>
                     <Button
                       type="button"
+                      variant={codeSearchOpen ? "secondary" : "outline"}
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => (codeSearchOpen ? setCodeSearchOpen(false) : openCodeSearch())}
+                      disabled={!htmlContent}
+                      title="Find text in the HTML"
+                    >
+                      <Search className="h-3 w-3 mr-1.5" />
+                      Search in Code
+                      {codeSearchOpen && codeMatches.length > 0 && (
+                        <span className="ml-1 text-muted-foreground">({codeMatches.length})</span>
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
                       variant="outline"
                       size="sm"
                       className="h-7 text-xs"
@@ -5577,7 +5838,68 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
                     </Button>
                   </div>
                 </div>
+                {codeSearchOpen && (
+                  <div className="flex items-center gap-2 border bg-muted/40 px-2 py-1.5">
+                    <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <input
+                      ref={codeSearchInputRef}
+                      value={codeSearchQuery}
+                      placeholder="Find in HTML…"
+                      className="flex-1 min-w-0 bg-transparent text-xs outline-none"
+                      onChange={(e) => {
+                        setCodeSearchQuery(e.target.value);
+                        runCodeSearch(e.target.value, 0);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          stepCodeMatch(e.shiftKey ? -1 : 1);
+                        } else if (e.key === "Escape") {
+                          e.preventDefault();
+                          setCodeSearchOpen(false);
+                        }
+                      }}
+                    />
+                    <span className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap">
+                      {codeSearchQuery.trim()
+                        ? codeMatches.length > 0
+                          ? `${codeMatchIdx + 1} / ${codeMatches.length}`
+                          : "no matches"
+                        : ""}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      onClick={() => stepCodeMatch(-1)}
+                      disabled={codeMatches.length === 0}
+                      title="Previous match (Shift+Enter)"
+                    >
+                      <ChevronUp className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      onClick={() => stepCodeMatch(1)}
+                      disabled={codeMatches.length === 0}
+                      title="Next match (Enter)"
+                    >
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      onClick={() => setCodeSearchOpen(false)}
+                      title="Close (Esc)"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
                 <textarea
+                  ref={mainCodeRef}
                   value={htmlContent}
                   onChange={(e) => setHtmlContent(e.target.value)}
                   className="w-full min-h-[600px] font-mono text-sm p-4 border bg-muted/50 focus:outline-none focus:ring-2 focus:ring-ring resize-y"
@@ -5589,6 +5911,9 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <Label className="text-xs">Preview</Label>
+                      <span className="text-[10px] text-muted-foreground">
+                        double-click text to find it in the HTML
+                      </span>
                       {mappedHtml !== null && (
                         <Badge variant="secondary" className="text-[10px] h-5">
                           {mappedContactLabel ? `Mapped: ${mappedContactLabel}` : "Showing exact preview"}
@@ -6559,6 +6884,46 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
                   className="max-w-[600px] mx-auto"
                 />
               </div>
+            </div>
+          )}
+        </section>
+
+        {/* Section: Note for the reviewer — written by the submitting user,
+            read by the admin before sending. */}
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+              7. Note for the Reviewer
+            </h2>
+            <Separator className="mt-2" />
+          </div>
+          {isSuperAdmin ? (
+            reviewNote ? (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <ScrollText className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                  <span className="text-xs font-medium text-amber-700 dark:text-amber-400">
+                    Note from the submitter — read before sending
+                  </span>
+                </div>
+                <p className="text-sm whitespace-pre-wrap">{reviewNote}</p>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                No note was left for this campaign.
+              </p>
+            )
+          ) : (
+            <div className="space-y-1.5">
+              <Textarea
+                rows={4}
+                placeholder="Anything the admin should know before sending — target audience, timing, special instructions…"
+                value={reviewNote}
+                onChange={(e) => setReviewNote(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Optional. The admin reviewing this campaign will see this note before sending.
+              </p>
             </div>
           )}
         </section>

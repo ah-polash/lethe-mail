@@ -198,6 +198,7 @@ model Campaign {
   totalBounced    Int      @default(0)
   totalComplaints Int      @default(0)
   totalUnsubscribed Int    @default(0)
+  reviewNote      String?  // note from the submitting user to the reviewing admin
   audienceSource  String   @default("internal") // internal | swipeone
   recipientEmails String?  // JSON array of recipient email addresses
   segmentIds      String?  // JSON array of SwipeOne segment IDs (future use)

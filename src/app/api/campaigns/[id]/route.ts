@@ -192,7 +192,7 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const { name, subject, fromEmail, fromName, htmlContent, templateId, recipientEmails, segmentIds, segmentNames, audienceSource, categoryId } = body;
+    const { name, subject, fromEmail, fromName, htmlContent, templateId, recipientEmails, segmentIds, segmentNames, audienceSource, categoryId, reviewNote } = body;
 
     const emails: string[] | undefined = recipientEmails;
 
@@ -217,6 +217,12 @@ export async function PUT(
         }),
         ...(audienceSource !== undefined && { audienceSource }),
         ...(categoryId !== undefined && { categoryId: categoryId || null }),
+        ...(reviewNote !== undefined && {
+          reviewNote:
+            typeof reviewNote === "string" && reviewNote.trim()
+              ? reviewNote.trim().slice(0, 5000)
+              : null,
+        }),
       },
     });
 

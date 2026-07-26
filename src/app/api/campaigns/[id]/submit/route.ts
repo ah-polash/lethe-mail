@@ -67,6 +67,14 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
         <p style="margin:0 0 6px;font-size:14px;"><strong>Campaign:</strong> ${esc(updated.name)}</p>
         <p style="margin:0;font-size:14px;"><strong>Subject:</strong> ${esc(updated.subject || "—")}</p>
       </div>
+      ${
+        updated.reviewNote
+          ? `<div style="border-left:3px solid #f59e0b;background:#fffbeb;border-radius:6px;padding:12px 16px;margin-bottom:20px;">
+        <p style="margin:0 0 4px;font-size:12px;font-weight:600;color:#b45309;">Note from ${esc(session.name)}</p>
+        <p style="margin:0;font-size:14px;color:#333;white-space:pre-wrap;">${esc(updated.reviewNote)}</p>
+      </div>`
+          : ""
+      }
       <a href="${reviewUrl}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:15px;">
         Review &amp; send
       </a>

@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     const session = await requireAuth();
     const body = await request.json();
 
-    const { name, subject, fromEmail, fromName, htmlContent, templateId, recipientEmails, segmentIds, segmentNames, audienceSource, categoryId } = body;
+    const { name, subject, fromEmail, fromName, htmlContent, templateId, recipientEmails, segmentIds, segmentNames, audienceSource, categoryId, reviewNote } = body;
 
     if (!name || !subject || !htmlContent) {
       return NextResponse.json(
@@ -61,6 +61,8 @@ export async function POST(request: NextRequest) {
         segmentNames: segmentNames ? JSON.stringify(segmentNames) : null,
         audienceSource: audienceSource || "internal",
         categoryId: categoryId || null,
+        reviewNote:
+          typeof reviewNote === "string" && reviewNote.trim() ? reviewNote.trim().slice(0, 5000) : null,
         status: "draft",
         createdBy: session.id,
       },
