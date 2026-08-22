@@ -6,6 +6,10 @@ export const maxDuration = 300; // give the loop room on Vercel
 // Continues campaigns that are stuck mid-send, so a large campaign finishes
 // without anyone keeping the dashboard tab open.
 //
+// Vercel Hobby plans only allow ONE cron run per day, so vercel.json schedules
+// this daily as a safety net. For prompt completion, call it directly (with the
+// secret) or point an external scheduler at it every few minutes.
+//
 // Auth: Vercel Cron sends `Authorization: Bearer $CRON_SECRET`. Manual calls can
 // pass ?secret=... instead. If CRON_SECRET is unset the endpoint is disabled.
 export async function GET(request: NextRequest) {
