@@ -54,7 +54,7 @@ export async function POST(
     // skipped automatically — so chunking is just rate-limiting the loop.
     const requestedChunk = Number(body?.chunkSize);
     const DEFAULT_CHUNK = 50;
-    const MAX_CHUNK = 200;
+    const MAX_CHUNK = 2000;
     const chunkSize = Number.isFinite(requestedChunk) && requestedChunk > 0
       ? Math.min(Math.floor(requestedChunk), MAX_CHUNK)
       : DEFAULT_CHUNK;
@@ -178,10 +178,7 @@ export async function POST(
 
     // Also check for any previously bounced (hard) or complained emails across all campaigns
     const suppressedEvents = await prisma.campaignEvent.findMany({
-      where: {
-        email: { in: recipientEmails },
-        eventType: { in: ["bounced", "complained", "unsubscribed"] },
-      },
+      where: { eventType: { in: ["bounced", "complained", "unsubscribed"] } },
       select: { email: true, eventType: true, metadata: true },
     });
 
@@ -217,10 +214,7 @@ export async function POST(
     // suppress recipients who unsubscribed from that specific category.
     if (campaign.categoryId) {
       const categoryOptOuts = await prisma.categoryUnsubscribe.findMany({
-        where: {
-          categoryId: campaign.categoryId,
-          email: { in: recipientEmails },
-        },
+        where: { categoryId: campaign.categoryId },
         select: { email: true },
       });
       for (const row of categoryOptOuts) suppressedEmails.add(row.email);
@@ -229,11 +223,7 @@ export async function POST(
     // Find recipients who already received this campaign successfully so a
     // resumed send (after a timeout / partial failure) doesn't double-deliver.
     const alreadySentEvents = await prisma.campaignEvent.findMany({
-      where: {
-        campaignId: id,
-        eventType: "sent",
-        email: { in: recipientEmails },
-      },
+      where: { campaignId: id, eventType: "sent" },
       select: { email: true },
     });
     const alreadySentEmails = new Set(alreadySentEvents.map((e) => e.email));
