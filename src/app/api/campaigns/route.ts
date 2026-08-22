@@ -11,12 +11,20 @@ export async function GET() {
 
     const where = session.role === "super_admin" ? {} : { createdBy: session.id };
 
+    // Explicit field list: `recipientEmails` caches the resolved audience and can
+    // be tens of MB for a large segment — never ship it in the list response.
     const campaigns = await prisma.campaign.findMany({
       where,
-      include: {
-        creator: {
-          select: { name: true },
-        },
+      select: {
+        id: true, name: true, subject: true, fromEmail: true, fromName: true,
+        status: true, scheduledAt: true, sentAt: true,
+        totalRecipients: true, totalSent: true, totalDelivered: true,
+        totalOpened: true, totalClicked: true, totalBounced: true,
+        totalComplaints: true, totalUnsubscribed: true,
+        audienceSource: true, segmentNames: true, categoryId: true,
+        reviewNote: true, templateId: true,
+        createdBy: true, createdAt: true, updatedAt: true,
+        creator: { select: { name: true } },
       },
       orderBy: { createdAt: "desc" },
     });
