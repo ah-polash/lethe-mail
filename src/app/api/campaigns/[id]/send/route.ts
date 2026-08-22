@@ -11,7 +11,14 @@ export async function POST(
   const { id } = await params;
 
   try {
-    await requireSuperAdmin();
+    // Normally super-admin only. The scheduled resume job has no session, so it
+    // authenticates with CRON_SECRET instead (shared secret, never public).
+    const cronSecret = process.env.CRON_SECRET;
+    const providedCronSecret = request.headers.get("x-cron-secret") || "";
+    const isCron = !!cronSecret && providedCronSecret === cronSecret;
+    if (!isCron) {
+      await requireSuperAdmin();
+    }
 
     const campaign = await prisma.campaign.findUnique({ where: { id } });
     if (!campaign) {
@@ -85,17 +92,45 @@ export async function POST(
         );
       }
 
-      const seenEmails = new Set<string>();
-      for (const segmentId of segmentIds) {
-        const contacts = await getSegmentContacts(segmentId);
-        for (const c of contacts as unknown as Record<string, unknown>[]) {
-          const email = typeof c.email === "string" ? c.email : "";
-          if (!email || seenEmails.has(email)) continue;
-          seenEmails.add(email);
-          contactByEmail.set(email, c);
+      // Resolving a segment means paginating every contact out of SwipeOne
+      // (100 per request). For a 13k-contact segment that is ~140 API calls —
+      // far too slow to repeat for every 50-email chunk, and a reliable way to
+      // hit the rate limit. So resolve once, cache the audience on the campaign,
+      // and reuse it for the remaining chunks of this send.
+      const cached: { email: string; contact: Record<string, unknown> }[] =
+        campaign.recipientEmails ? JSON.parse(campaign.recipientEmails) : [];
+
+      if (Array.isArray(cached) && cached.length > 0 && typeof cached[0] === "object") {
+        for (const row of cached) {
+          if (!row?.email) continue;
+          contactByEmail.set(row.email, row.contact || { email: row.email });
+        }
+        recipientEmails = cached.map((r) => r.email).filter(Boolean);
+      } else {
+        const seenEmails = new Set<string>();
+        for (const segmentId of segmentIds) {
+          const contacts = await getSegmentContacts(segmentId);
+          for (const c of contacts as unknown as Record<string, unknown>[]) {
+            const email = typeof c.email === "string" ? c.email : "";
+            if (!email || seenEmails.has(email)) continue;
+            seenEmails.add(email);
+            contactByEmail.set(email, c);
+          }
+        }
+        recipientEmails = Array.from(seenEmails);
+
+        // Persist the resolved audience so later chunks skip the SwipeOne pull.
+        if (recipientEmails.length > 0) {
+          await prisma.campaign.update({
+            where: { id },
+            data: {
+              recipientEmails: JSON.stringify(
+                recipientEmails.map((email) => ({ email, contact: contactByEmail.get(email) || { email } }))
+              ),
+            },
+          });
         }
       }
-      recipientEmails = Array.from(seenEmails);
 
       if (recipientEmails.length === 0) {
         return NextResponse.json(
