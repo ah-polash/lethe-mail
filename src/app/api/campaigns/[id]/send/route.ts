@@ -168,11 +168,26 @@ export async function POST(
       }
     }
 
-    // Set status to sending (totalRecipients updated after suppression filtering below)
-    await prisma.campaign.update({
-      where: { id },
-      data: { status: "sending" },
+    // Only one batch may run per campaign at a time. Without this, two senders
+    // (a browser tab, the cron job, a retried request whose client timed out)
+    // each snapshot "already sent" at start and re-send the overlap — which is
+    // exactly how duplicate emails happen. Claim the lock atomically: the
+    // updateMany only matches when the lock is free or stale.
+    const LOCK_STALE_MS = 15 * 60 * 1000;
+    const staleBefore = new Date(Date.now() - LOCK_STALE_MS);
+    const claimed = await prisma.campaign.updateMany({
+      where: {
+        id,
+        OR: [{ sendLockedAt: null }, { sendLockedAt: { lt: staleBefore } }],
+      },
+      data: { sendLockedAt: new Date(), status: "sending" },
     });
+    if (claimed.count === 0) {
+      return NextResponse.json(
+        { error: "A send is already in progress for this campaign. Try again shortly." },
+        { status: 409 }
+      );
+    }
 
     const baseUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
@@ -253,6 +268,7 @@ export async function POST(
             totalRecipients: recipientEmails.length,
           },
         });
+        await prisma.campaign.updateMany({ where: { id }, data: { sendLockedAt: null } });
         return NextResponse.json({
           campaign: updated,
           result: {
@@ -269,6 +285,7 @@ export async function POST(
         where: { id },
         data: { status: "sent", sentAt: new Date(), totalSent: 0, totalRecipients: recipientEmails.length },
       });
+      await prisma.campaign.updateMany({ where: { id }, data: { sendLockedAt: null } });
       return NextResponse.json({
         error: `All ${recipientEmails.length} recipient(s) are suppressed (unsubscribed, bounced, or complained). No emails sent.`,
         skipped: skippedCount,
@@ -354,6 +371,7 @@ export async function POST(
           status: "failed",
         },
       });
+      await prisma.campaign.updateMany({ where: { id }, data: { sendLockedAt: null } });
       return NextResponse.json({
         campaign: updated,
         result: {
@@ -379,6 +397,7 @@ export async function POST(
         totalSent: totalSentCumulative,
         status: done ? "sent" : "sending",
         sentAt: done ? (campaign.sentAt ?? new Date()) : campaign.sentAt,
+        sendLockedAt: null, // batch finished — let the next one start
       },
     });
 
@@ -395,6 +414,8 @@ export async function POST(
       },
     });
   } catch (error) {
+    // Never leave the lock held on a failure.
+    await prisma.campaign.updateMany({ where: { id }, data: { sendLockedAt: null } }).catch(() => {});
     const message = error instanceof Error ? error.message : "Internal server error";
     if (message === "Unauthorized") {
       return NextResponse.json({ error: message }, { status: 401 });

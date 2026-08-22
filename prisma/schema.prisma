@@ -199,6 +199,7 @@ model Campaign {
   totalComplaints Int      @default(0)
   totalUnsubscribed Int    @default(0)
   reviewNote      String?  // note from the submitting user to the reviewing admin
+  sendLockedAt    DateTime? // held while a send batch runs, so two senders can't overlap and double-send
   audienceSource  String   @default("internal") // internal | swipeone
   recipientEmails String?  // JSON array of recipient email addresses
   segmentIds      String?  // JSON array of SwipeOne segment IDs (future use)
