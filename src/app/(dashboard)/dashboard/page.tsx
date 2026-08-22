@@ -139,9 +139,14 @@ export default function DashboardPage() {
 
       {/* Quick Actions */}
       <div className="flex gap-3">
-        <Link href="/campaigns/new" className={cn(buttonVariants())}>
+        <Link href="/campaigns/swipeone/new" className={cn(buttonVariants())}>
             <Plus className="mr-2 h-4 w-4" />
             New Campaign
+        </Link>
+        {/* A/B: the redesigned wizard builder */}
+        <Link href="/campaigns/swipeone/new-v2" className={cn(buttonVariants({ variant: "secondary" }))}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Campaign V2
         </Link>
         <Link href="/templates/new" className={cn(buttonVariants({ variant: "outline" }))}>
             <FileText className="mr-2 h-4 w-4" />

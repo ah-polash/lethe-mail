@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { requireSuperAdmin, hashPassword } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { sendEmail, getSesConfig } from "@/lib/ses";
+import { sendEmail, resolveNotificationSender } from "@/lib/ses";
 
 // Readable random password: 12 chars from an unambiguous alphabet (no 0/O/1/l).
 const PW_ALPHABET = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -91,9 +91,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Maximum 100 users per batch" }, { status: 400 });
     }
 
-    // Sender: the active SES connection's default from address.
-    const sesConfig = await getSesConfig();
-    const fromEmail = sesConfig?.defaultFromEmail || "";
+    // Sender: the active connection's default From address, or any verified
+    // SES identity if that setting was never filled in.
+    const sender = await resolveNotificationSender();
+    const fromEmail = sender.fromEmail;
     const brandSetting = await prisma.appSetting.findUnique({ where: { key: "brand.name" } });
     const brand = brandSetting?.value?.trim() || "bPlugins";
     const baseUrl = (
@@ -133,7 +134,7 @@ export async function POST(request: NextRequest) {
           status: "created",
           emailSent: false,
           tempPassword,
-          emailError: "No default From email on the active SES connection",
+          emailError: sender.error || "No sender address available for notifications",
         });
         continue;
       }

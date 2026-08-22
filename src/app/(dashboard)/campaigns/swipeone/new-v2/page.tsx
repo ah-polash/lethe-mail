@@ -34,6 +34,9 @@ import {
   ArrowLeft,
   Loader2,
   ScrollText,
+  Check,
+  ArrowRight,
+  LayoutGrid,
   Globe,
   CalendarClock,
   Sparkles,
@@ -396,6 +399,9 @@ export function SwipeOneCampaignEditor({
   // Smart map-variables modal (large)
   const [mapVarsOpen, setMapVarsOpen] = useState(false);
   const codeTextareaRef = useRef<HTMLTextAreaElement>(null);
+  // How the user wants to build the email: chooser first, then that one interface.
+  const [designMode, setDesignMode] = useState<"" | "ai" | "html" | "library">("");
+
   // Main HTML editor (left pane) — target for "double-click preview → highlight source".
   const mainCodeRef = useRef<HTMLTextAreaElement>(null);
 
@@ -2556,6 +2562,87 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
     .filter((s) => selectedSegments.includes(s._id))
     .map((s) => s.name);
 
+  // --- Wizard -----------------------------------------------------------------
+  // One task per screen. Each step maps to the section id(s) it renders, so the
+  // section markup itself is untouched — only what's visible changes.
+  const wizardSteps = useMemo(() => {
+    const contentStep = {
+      key: "content",
+      title:
+        designMode === ""
+          ? "Choose how you would like to design the campaign"
+          : designMode === "ai"
+          ? "Generate your email with AI"
+          : designMode === "html"
+          ? "Add your HTML template"
+          : "Pick a template from your library",
+      hint:
+        designMode === ""
+          ? "Pick a starting point — you can switch method at any time."
+          : designMode === "ai"
+          ? "Choose a format, describe what you want, and generate."
+          : designMode === "html"
+          ? "Paste your HTML (or drop in an .html file's contents) and preview it live."
+          : "Load a saved template, tweak it if needed, and continue.",
+      secs: [1],
+      ready: !!htmlContent,
+      blocker:
+        designMode === ""
+          ? "Choose a design method to continue."
+          : "Add some email content to continue.",
+    };
+    const reviewStep = {
+      key: "review",
+      title: isSuperAdmin ? "Review & send" : "Review & submit",
+      hint: isSuperAdmin
+        ? "Check everything, optionally schedule, then send."
+        : "Check your email and leave a note for the admin who will send it.",
+      secs: isSuperAdmin ? [4, 5, 6, 7] : [4, 6, 7],
+      ready: true,
+      blocker: "",
+    };
+    if (!isSuperAdmin) return [contentStep, reviewStep];
+    return [
+      contentStep,
+      {
+        key: "details",
+        title: "Campaign details",
+        hint: "Name it, set the subject line and choose the sender.",
+        secs: [2],
+        ready: !!name.trim() && !!subject.trim() && !!fromEmail,
+        blocker: "Name, subject and sender email are required.",
+      },
+      {
+        key: "audience",
+        title: "Choose the audience",
+        hint: "Pick the SwipeOne segments that will receive this campaign.",
+        secs: [3],
+        ready: selectedSegments.length > 0,
+        blocker: "Select at least one segment.",
+      },
+      reviewStep,
+    ];
+  }, [htmlContent, name, subject, fromEmail, selectedSegments.length, isSuperAdmin, designMode]);
+
+  const [wizardIdx, setWizardIdx] = useState(0);
+  const stepIdx = Math.min(wizardIdx, wizardSteps.length - 1);
+  const currentStep = wizardSteps[stepIdx];
+  const isLastStep = stepIdx === wizardSteps.length - 1;
+  const showSec = (n: number) => currentStep.secs.includes(n);
+
+  const goToStep = (i: number) => {
+    setWizardIdx(Math.max(0, Math.min(i, wizardSteps.length - 1)));
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const goNext = () => {
+    if (!currentStep.ready) {
+      toast.error(currentStep.blocker || "Finish this step first");
+      return;
+    }
+    goToStep(stepIdx + 1);
+  };
+
   // Campaign name for saving. General users never see the Campaign Details
   // section (an admin fills it in at review time), so fall back to the email
   // subject, then the first heading in the content, then a dated placeholder —
@@ -2893,35 +2980,112 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
 
   return (
     <div className="flex flex-col -mx-6 lg:-mx-8 -mb-6 lg:-mb-8 -mt-16 lg:-mt-8 min-h-screen">
-      {/* Header */}
-      <div className="flex-shrink-0 flex items-center justify-between px-6 lg:px-8 py-3 border-b bg-background sticky top-0 z-20">
-        <div className="flex items-center gap-3">
-          <Link
-            href="/campaigns"
-            className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8")}
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-          <Globe className="h-5 w-5 text-muted-foreground" />
-          <h1 className="text-xl font-semibold">Create Campaign</h1>
+      {/* Wizard header — progress, current step, escape hatches */}
+      <div className="flex-shrink-0 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 sticky top-0 z-30">
+        <div className="w-full px-6 lg:px-8 pt-3">
+          {/* Step dots */}
+          <div className="flex items-center gap-2">
+            <Link
+              href={isSuperAdmin ? "/campaigns" : "/dashboard"}
+              className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-7 w-7 shrink-0 -ml-1")}
+              title="Leave"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+            {wizardSteps.map((s, i) => (
+              <button
+                key={s.key}
+                type="button"
+                onClick={() => (i < stepIdx ? goToStep(i) : i === stepIdx ? null : goNext())}
+                className="group flex flex-1 items-center gap-2"
+                title={s.title}
+              >
+                <span
+                  className={cn(
+                    "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold transition-colors",
+                    i === stepIdx
+                      ? "bg-primary text-primary-foreground ring-4 ring-primary/15"
+                      : i < stepIdx
+                      ? "bg-primary/15 text-primary"
+                      : "bg-muted text-muted-foreground"
+                  )}
+                >
+                  {i < stepIdx ? <Check className="h-3 w-3" /> : i + 1}
+                </span>
+                {i < wizardSteps.length - 1 && (
+                  <span
+                    className={cn(
+                      "h-0.5 flex-1 rounded transition-colors",
+                      i < stepIdx ? "bg-primary/40" : "bg-muted"
+                    )}
+                  />
+                )}
+              </button>
+            ))}
+            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+              Step {stepIdx + 1} of {wizardSteps.length}
+            </span>
+          </div>
+
+          {/* Title + secondary actions */}
+          <div className="flex items-end justify-between gap-4 py-3">
+            <div className="min-w-0">
+              <h1 className="truncate text-xl font-semibold tracking-tight">{currentStep.title}</h1>
+              <p className="truncate text-sm text-muted-foreground">{currentStep.hint}</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2 pb-0.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8"
+                onClick={openPreviewSend}
+                disabled={sending}
+                title="Send yourself a test email"
+              >
+                <Send className="h-3.5 w-3.5 mr-1.5" />
+                Test
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                onClick={handleSaveDraft}
+                disabled={saving || sending}
+              >
+                {saving ? "Saving..." : "Save draft"}
+              </Button>
+            </div>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {selectedSegments.length > 0 && (
-            <Badge variant="secondary" className="text-xs">
-              <Globe className="h-3 w-3 mr-1" />
-              {selectedSegments.length} segment{selectedSegments.length !== 1 ? "s" : ""}
-            </Badge>
-          )}
-        </div>
+
+        {sending && sendProgress && sendProgress.total > 0 && (
+          <div className="flex w-full items-center gap-3 px-6 lg:px-8 pb-2">
+            <Progress
+              value={Math.min(
+                100,
+                Math.round(
+                  ((sendProgress.sent + sendProgress.failed) / Math.max(sendProgress.total, 1)) * 100
+                )
+              )}
+              className="flex-1"
+            />
+            <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+              {sendProgress.sent + sendProgress.failed} / {sendProgress.total} sent
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* Body — single long page */}
-      <div className="flex-1 px-6 lg:px-8 py-6 space-y-8">
+      {/* One step on screen at a time */}
+      <div className="flex-1 px-6 lg:px-8 py-6">
+        <div className="w-full space-y-5">
         {/* Section: Content */}
-        <section className="space-y-3">
+        {showSec(1) && (
+        <section id="sec-1" className="scroll-mt-28 rounded-xl border bg-card shadow-sm px-5 py-4 space-y-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              1. Email Content
+            <h2 className="flex items-center gap-2.5 text-base font-semibold tracking-tight">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">1</span>
+              Email Content
             </h2>
             <div className="flex items-center gap-2">
               {isHtmlMode && (
@@ -2953,8 +3117,69 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
             </div>
           </div>
           <Separator />
+          {designMode === "" ? (
+            <div className="grid gap-3 sm:grid-cols-3 pt-1">
+              {[
+                {
+                  key: "ai" as const,
+                  icon: <Sparkles className="h-5 w-5" />,
+                  title: "Generate with AI",
+                  body: "Describe the email or pick a ready-made format — AI writes and designs it for you.",
+                },
+                {
+                  key: "html" as const,
+                  icon: <Code className="h-5 w-5" />,
+                  title: "I have the template",
+                  body: "Paste your own HTML or an .html file you already designed.",
+                },
+                {
+                  key: "library" as const,
+                  icon: <LayoutGrid className="h-5 w-5" />,
+                  title: "Use a saved template",
+                  body: "Load one from your template library, tweak it, and send.",
+                },
+              ].map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => {
+                    setDesignMode(opt.key);
+                    if (opt.key === "html") setIsHtmlMode(true);
+                    if (opt.key === "library") loadDynamicLibrary();
+                  }}
+                  className="group flex flex-col items-start gap-2 rounded-xl border-2 border-border bg-background p-4 text-left transition-all hover:border-primary hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                    {opt.icon}
+                  </span>
+                  <span className="font-semibold">{opt.title}</span>
+                  <span className="text-xs leading-relaxed text-muted-foreground">{opt.body}</span>
+                  <span className="mt-auto pt-2 text-xs font-medium text-primary opacity-0 transition-opacity group-hover:opacity-100">
+                    Choose <ArrowRight className="inline h-3 w-3" />
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 pt-1">
+              <Badge variant="secondary" className="gap-1.5">
+                {designMode === "ai" ? "Generating with AI" : designMode === "html" ? "Your own HTML" : "From template library"}
+              </Badge>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => setDesignMode("")}
+              >
+                Change method
+              </Button>
+            </div>
+          )}
+
 
           {/* AI Generation buttons */}
+          {designMode === "ai" && (
+          <>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-muted-foreground mr-1">AI Email Generation:</span>
             <Button
@@ -5903,6 +6128,10 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
             </div>
           )}
 
+          </>
+          )}
+
+          {designMode === "library" && (
           <div>
             <div className="flex items-center justify-between">
               <Label className="text-xs text-muted-foreground">
@@ -6039,7 +6268,11 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
             )}
           </div>
 
+          )}
+
           {/* Editor — block or HTML */}
+          {designMode !== "" && (
+          <>
           {isHtmlMode ? (
             <div className={cn("grid gap-4", showHtmlPreview ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1")}>
               <div className="space-y-2">
@@ -6854,17 +7087,20 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          </>
+          )}
         </section>
+        )}
 
         {/* Section: Details — admin-only; an admin completes these before sending
             a campaign submitted by a general user. */}
-        {isSuperAdmin && (
-        <section className="space-y-4">
+        {isSuperAdmin && showSec(2) && (
+        <section id="sec-2" className="scroll-mt-28 rounded-xl border bg-card shadow-sm px-5 py-4 space-y-4">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              2. Campaign Details
+            <h2 className="flex items-center gap-2.5 text-base font-semibold tracking-tight">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">2</span>
+              Campaign Details
             </h2>
-            <Separator className="mt-2" />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-1">
@@ -6958,13 +7194,13 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
         )}
 
         {/* Section: SwipeOne Segments — admin-only (audience is chosen at review time) */}
-        {isSuperAdmin && (
-        <section className="space-y-3">
+        {isSuperAdmin && showSec(3) && (
+        <section id="sec-3" className="scroll-mt-28 rounded-xl border bg-card shadow-sm px-5 py-4 space-y-3">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              3. SwipeOne Segments
+            <h2 className="flex items-center gap-2.5 text-base font-semibold tracking-tight">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">3</span>
+              SwipeOne Segments
             </h2>
-            <Separator className="mt-2" />
           </div>
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">
@@ -7024,12 +7260,13 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
         )}
 
         {/* Section: Available Variables */}
-        <section className="space-y-3">
+        {showSec(4) && (
+        <section id="sec-4" className="scroll-mt-28 rounded-xl border bg-card shadow-sm px-5 py-4 space-y-3">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              4. Available SwipeOne Variables
+            <h2 className="flex items-center gap-2.5 text-base font-semibold tracking-tight">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">4</span>
+              Available SwipeOne Variables
             </h2>
-            <Separator className="mt-2" />
           </div>
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">
@@ -7056,14 +7293,16 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
             </div>
           )}
         </section>
+        )}
 
         {/* Section: Schedule */}
-        <section className="space-y-3">
+        {showSec(5) && (
+        <section id="sec-5" className="scroll-mt-28 rounded-xl border bg-card shadow-sm px-5 py-4 space-y-3">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              5. Schedule (optional)
+            <h2 className="flex items-center gap-2.5 text-base font-semibold tracking-tight">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">5</span>
+              Schedule (optional)
             </h2>
-            <Separator className="mt-2" />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
             <div className="space-y-1">
@@ -7102,14 +7341,16 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
             )}
           </div>
         </section>
+        )}
 
         {/* Section: Review */}
-        <section className="space-y-3">
+        {showSec(6) && (
+        <section id="sec-6" className="scroll-mt-28 rounded-xl border bg-card shadow-sm px-5 py-4 space-y-3">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              6. Review
+            <h2 className="flex items-center gap-2.5 text-base font-semibold tracking-tight">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">6</span>
+              Review
             </h2>
-            <Separator className="mt-2" />
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <div className="space-y-0.5">
@@ -7171,15 +7412,17 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
             </div>
           )}
         </section>
+        )}
 
         {/* Section: Note for the reviewer — written by the submitting user,
             read by the admin before sending. */}
-        <section className="space-y-3">
+        {showSec(7) && (
+        <section id="sec-7" className="scroll-mt-28 rounded-xl border bg-card shadow-sm px-5 py-4 space-y-3">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              7. Note for the Reviewer
+            <h2 className="flex items-center gap-2.5 text-base font-semibold tracking-tight">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">7</span>
+              Note for the Reviewer
             </h2>
-            <Separator className="mt-2" />
           </div>
           {isSuperAdmin ? (
             reviewNote ? (
@@ -7201,75 +7444,65 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
             <ReviewNoteField value={reviewNote} onCommit={setReviewNote} />
           )}
         </section>
+        )}
+        </div>
       </div>
 
-      {/* Footer */}
-      <div className="flex-shrink-0 flex items-center justify-end px-6 lg:px-8 py-3 border-t bg-background sticky bottom-0 z-20 gap-2">
-        {sending && sendProgress && sendProgress.total > 0 && (
-          <div className="flex-1 flex items-center gap-3 mr-2 min-w-0 max-w-md">
-            <Progress
-              value={Math.min(
-                100,
-                Math.round(
-                  ((sendProgress.sent + sendProgress.failed) /
-                    Math.max(sendProgress.total, 1)) *
-                    100
-                )
-              )}
-              className="flex-1 min-w-[120px]"
-            />
-            <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-              {sendProgress.sent + sendProgress.failed} / {sendProgress.total} sent
-              {sendProgress.failed > 0 && (
-                <span className="text-destructive ml-1">({sendProgress.failed} failed)</span>
-              )}
-            </span>
-          </div>
-        )}
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-9"
-          onClick={openPreviewSend}
-          disabled={sending}
-        >
-          <Send className="h-3.5 w-3.5 mr-1.5" />
-          Send Preview
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-9"
-          onClick={handleSaveDraft}
-          disabled={saving || sending}
-        >
-          {saving ? "Saving..." : "Save Draft"}
-        </Button>
-        {isSuperAdmin ? (
-          <Button size="sm" className="h-9" onClick={handleSendNow} disabled={sending}>
-            {sending
-              ? sendProgress && sendProgress.total > 0
-                ? `Sending ${sendProgress.sent + sendProgress.failed}/${sendProgress.total}...`
-                : "Sending..."
-              : "Send Now"}
-          </Button>
-        ) : (
+      {/* Wizard footer — Back / Continue, with the commit action on the last step */}
+      <div className="flex-shrink-0 border-t bg-background sticky bottom-0 z-20 px-6 lg:px-8 py-3">
+        <div className="flex w-full items-center gap-3">
           <Button
+            variant="ghost"
             size="sm"
             className="h-9"
-            onClick={handleSubmitToAdmin}
-            disabled={submitting || saving}
+            onClick={() => goToStep(stepIdx - 1)}
+            disabled={stepIdx === 0}
           >
-            {submitting ? (
-              <>
-                <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                Submitting...
-              </>
-            ) : (
-              "Submit this campaign to the admin"
-            )}
+            <ArrowLeft className="h-4 w-4 mr-1.5" />
+            Back
           </Button>
-        )}
+
+          {!currentStep.ready && currentStep.blocker && (
+            <span className="hidden sm:block text-xs text-muted-foreground">
+              {currentStep.blocker}
+            </span>
+          )}
+
+          <div className="ml-auto flex items-center gap-2">
+            {!isLastStep ? (
+              <Button size="sm" className="h-9" onClick={goNext}>
+                Continue
+                <ArrowRight className="h-4 w-4 ml-1.5" />
+              </Button>
+            ) : isSuperAdmin ? (
+              <Button size="sm" className="h-9" onClick={handleSendNow} disabled={sending}>
+                {sending
+                  ? sendProgress && sendProgress.total > 0
+                    ? `Sending ${sendProgress.sent + sendProgress.failed}/${sendProgress.total}...`
+                    : "Sending..."
+                  : scheduledAt
+                  ? "Send now (ignores schedule)"
+                  : "Send campaign"}
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                className="h-9"
+                onClick={handleSubmitToAdmin}
+                disabled={submitting || saving}
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  "Submit for review"
+                )}
+              </Button>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

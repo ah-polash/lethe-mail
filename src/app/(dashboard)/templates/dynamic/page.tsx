@@ -57,7 +57,8 @@ type ModeFilter =
   | "summer-sale"
   | "bfcm-sale"
   | "mothers-day-sale"
-  | "ceo-offer";
+  | "ceo-offer"
+  | "support-day";
 type ColCount = 1 | 2 | 3 | 4 | 5;
 
 const AI_MODE_LABELS: Record<string, string> = {
@@ -69,6 +70,7 @@ const AI_MODE_LABELS: Record<string, string> = {
   "bfcm-sale": "BFCM Sale",
   "mothers-day-sale": "Mother's Day Sale",
   "ceo-offer": "CEOs Offer",
+  "support-day": "Support Day",
 };
 
 const aiModeLabel = (mode: string | null | undefined) =>
@@ -232,6 +234,7 @@ export default function DynamicTemplatesPage() {
             <SelectItem value="bfcm-sale">BFCM Sale</SelectItem>
             <SelectItem value="mothers-day-sale">Mother&apos;s Day Sale</SelectItem>
             <SelectItem value="ceo-offer">CEOs Offer</SelectItem>
+            <SelectItem value="support-day">Support Day</SelectItem>
           </SelectContent>
         </Select>
         <span className="text-xs text-muted-foreground ml-auto">

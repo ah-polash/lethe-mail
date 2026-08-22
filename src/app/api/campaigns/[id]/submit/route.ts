@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { sendEmail, getSesConfig } from "@/lib/ses";
+import { sendEmail, resolveNotificationSender } from "@/lib/ses";
 
 function handleError(error: unknown) {
   const message = error instanceof Error ? error.message : "Internal server error";
@@ -42,8 +42,9 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
         where: { role: "super_admin" },
         select: { email: true },
       });
-      const sesConfig = await getSesConfig();
-      const fromEmail = sesConfig?.defaultFromEmail || "";
+      const sender = await resolveNotificationSender();
+      const fromEmail = sender.fromEmail;
+      const senderError = sender.error;
       const brandSetting = await prisma.appSetting.findUnique({ where: { key: "brand.name" } });
       const brand = brandSetting?.value?.trim() || "bPlugins";
       const baseUrl = (
@@ -93,7 +94,7 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
         else notified = admins.length;
       } else {
         emailError = !fromEmail
-          ? "No default From email on the active SES connection"
+          ? senderError || "No sender address available for notifications"
           : "No super admin accounts found";
       }
     } catch (e) {

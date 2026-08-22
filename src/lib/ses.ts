@@ -94,6 +94,29 @@ export async function listVerifiedIdentities(): Promise<{
   }
 }
 
+// Sender address for system notifications (admin alerts, new-account
+// credentials). Prefers the active connection's default From address, but falls
+// back to any verified email identity so notifications still go out when that
+// setting was never filled in.
+export async function resolveNotificationSender(): Promise<{ fromEmail: string; error?: string }> {
+  const config = await getSesConfig();
+  if (!config) return { fromEmail: "", error: "No active SES configuration" };
+
+  const preferred = config.defaultFromEmail?.trim();
+  if (preferred) return { fromEmail: preferred };
+
+  const { identities, error } = await listVerifiedIdentities();
+  const verified = identities.find((i) => i.verified && i.type === "EMAIL_ADDRESS");
+  if (verified) return { fromEmail: verified.identity };
+
+  return {
+    fromEmail: "",
+    error:
+      error ||
+      "No sender available — set a default From email on the active SES connection (Settings → SES) or verify an email identity in AWS SES",
+  };
+}
+
 // List verified email identities from SES using arbitrary credentials.
 // Used by the Settings dialog when configuring a non-active connection.
 export async function listVerifiedIdentitiesFor(creds: {

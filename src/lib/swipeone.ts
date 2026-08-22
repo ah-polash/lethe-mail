@@ -4,26 +4,50 @@ async function getSwipeOneConfig() {
   return prisma.swipeOneConfig.findFirst({ where: { isActive: true } });
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// SwipeOne rate-limits bursts (HTTP 429). Paginating a large segment fires many
+// requests in a row, so retry those — and transient 5xx — with exponential
+// backoff instead of failing the whole campaign send.
+const MAX_ATTEMPTS = 5;
+
 async function swipeOneRequest(method: string, endpoint: string, body?: unknown) {
   const config = await getSwipeOneConfig();
   if (!config) throw new Error("SwipeOne not configured");
 
   const baseUrl = config.baseUrl.replace(/\/+$/, "");
-  const res = await fetch(`${baseUrl}/api${endpoint}`, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": config.apiKey,
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
 
-  if (!res.ok) {
+  let lastError = "";
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const res = await fetch(`${baseUrl}/api${endpoint}`, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": config.apiKey,
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+
+    if (res.ok) return res.json();
+
     const text = await res.text();
-    throw new Error(`SwipeOne API error ${res.status}: ${text}`);
+    lastError = `SwipeOne API error ${res.status}: ${text}`;
+
+    const retryable = res.status === 429 || res.status >= 500;
+    if (!retryable || attempt === MAX_ATTEMPTS) break;
+
+    // Honour Retry-After when the server sends it, else back off 1s, 2s, 4s, 8s
+    // (plus jitter so parallel senders don't retry in lockstep).
+    const retryAfter = Number(res.headers.get("retry-after"));
+    const backoff = Number.isFinite(retryAfter) && retryAfter > 0
+      ? retryAfter * 1000
+      : 2 ** (attempt - 1) * 1000 + Math.floor(Math.random() * 250);
+
+    console.warn(`[swipeone] ${res.status} on ${endpoint} — retry ${attempt}/${MAX_ATTEMPTS - 1} in ${backoff}ms`);
+    await sleep(backoff);
   }
 
-  return res.json();
+  throw new Error(lastError);
 }
 
 // --- Workspace-based endpoints (Direct API) ---
@@ -51,6 +75,10 @@ export async function getSegmentContacts(segmentId: string, limit = 100) {
 
     if (contacts.length < limit || !result.data?.searchAfter) break;
     searchAfter = result.data.searchAfter;
+
+    // Gentle pacing between pages — large segments would otherwise fire
+    // hundreds of requests back-to-back and hit the rate limit.
+    await sleep(200);
   }
 
   return allContacts;
