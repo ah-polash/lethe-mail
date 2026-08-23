@@ -3,12 +3,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Image as ImageIcon, Upload, Search, Trash2, Copy, Check, Loader2,
-  FileText, Film, Code2, Pencil,
+  FileText, Film, Code2, Pencil, Sparkles, Wand2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -27,6 +32,9 @@ export interface MediaAsset {
   mimeType: string;
   size: number;
   altText: string | null;
+  source?: string;
+  aiPrompt?: string | null;
+  aiModel?: string | null;
   createdAt: string;
   creator?: { name: string };
 }
@@ -59,6 +67,17 @@ export default function MediaLibraryPage() {
   const [editAlt, setEditAlt] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // AI generator
+  const [genOpen, setGenOpen] = useState(false);
+  const [genPrompt, setGenPrompt] = useState("");
+  const [genStyle, setGenStyle] = useState("hero");
+  const [genAspect, setGenAspect] = useState("banner");
+  const [genModel, setGenModel] = useState("google/gemini-2.5-flash-image");
+  const [genCount, setGenCount] = useState("1");
+  const [generating, setGenerating] = useState(false);
+  const [models, setModels] = useState<{ id: string; label: string; note: string; approxCost: string }[]>([]);
+  const [sourceFilter, setSourceFilter] = useState<"all" | "ai" | "upload">("all");
+
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/media");
@@ -73,6 +92,38 @@ export default function MediaLibraryPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    fetch("/api/media/generate")
+      .then((r) => r.json())
+      .then((d) => setModels(d.models || []))
+      .catch(() => {});
+  }, []);
+
+  const generate = async () => {
+    if (!genPrompt.trim()) { toast.error("Describe the image you want"); return; }
+    setGenerating(true);
+    try {
+      const res = await fetch("/api/media/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: genPrompt, style: genStyle, aspect: genAspect,
+          model: genModel, count: Number(genCount),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Generation failed");
+      const n = data.assets?.length || 0;
+      toast.success(`Generated ${n} image${n === 1 ? "" : "s"}${data.cost ? ` · $${Number(data.cost).toFixed(3)}` : ""}`);
+      setGenOpen(false);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Generation failed");
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   const uploadFiles = useCallback(async (files: FileList | File[]) => {
     const list = Array.from(files);
@@ -145,9 +196,17 @@ export default function MediaLibraryPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return assets;
-    return assets.filter((a) => a.name.toLowerCase().includes(q) || (a.altText || "").toLowerCase().includes(q));
-  }, [assets, search]);
+    return assets.filter((a) => {
+      if (sourceFilter === "ai" && a.source !== "ai") return false;
+      if (sourceFilter === "upload" && a.source === "ai") return false;
+      if (!q) return true;
+      return (
+        a.name.toLowerCase().includes(q) ||
+        (a.altText || "").toLowerCase().includes(q) ||
+        (a.aiPrompt || "").toLowerCase().includes(q)
+      );
+    });
+  }, [assets, search, sourceFilter]);
 
   const totalSize = useMemo(() => assets.reduce((s, a) => s + a.size, 0), [assets]);
 
@@ -177,11 +236,30 @@ export default function MediaLibraryPage() {
             accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml,application/pdf,video/mp4,video/webm"
             onChange={(e) => { if (e.target.files) uploadFiles(e.target.files); e.target.value = ""; }}
           />
+          <Button variant="outline" onClick={() => setGenOpen(true)} className="gap-2">
+            <Sparkles className="h-4 w-4" />
+            Generate with AI
+          </Button>
           <Button onClick={() => fileRef.current?.click()} disabled={uploading > 0} className="gap-2">
             {uploading > 0 ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
             {uploading > 0 ? `Uploading ${uploading}…` : "Upload"}
           </Button>
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {(["all", "ai", "upload"] as const).map((k) => (
+          <button
+            key={k}
+            onClick={() => setSourceFilter(k)}
+            className={cn(
+              "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+              sourceFilter === k ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground hover:bg-accent"
+            )}
+          >
+            {k === "all" ? "All" : k === "ai" ? "AI generated" : "Uploaded"}
+          </button>
+        ))}
       </div>
 
       <div className="relative max-w-sm">
@@ -235,9 +313,19 @@ export default function MediaLibraryPage() {
               </div>
               <CardContent className="p-2.5 flex flex-col gap-1.5 flex-1">
                 <p className="text-xs font-medium truncate" title={a.name}>{a.name}</p>
-                <p className="text-[10px] text-muted-foreground">
+                <p className="text-[10px] text-muted-foreground flex items-center gap-1">
                   {formatBytes(a.size)} · {a.mimeType.split("/")[1]}
+                  {a.source === "ai" && (
+                    <Badge variant="secondary" className="ml-auto gap-0.5 px-1 py-0 text-[9px]">
+                      <Sparkles className="h-2.5 w-2.5" /> AI
+                    </Badge>
+                  )}
                 </p>
+                {a.aiPrompt && (
+                  <p className="text-[10px] text-muted-foreground line-clamp-2 italic" title={a.aiPrompt}>
+                    “{a.aiPrompt}”
+                  </p>
+                )}
                 <div className="flex items-center gap-1 mt-auto pt-1.5 border-t">
                   <Button variant="ghost" size="icon-sm" title="Copy URL" onClick={() => copy(a)}>
                     {copiedId === a.id ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
@@ -278,6 +366,123 @@ export default function MediaLibraryPage() {
           ))}
         </div>
       )}
+
+
+      {/* AI image generator */}
+      <Dialog open={genOpen} onOpenChange={(o) => !generating && setGenOpen(o)}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-primary" /> Generate an image
+            </DialogTitle>
+            <DialogDescription>
+              Describe what you want. Generated images are added straight to your library.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-1">
+            <div className="space-y-1.5">
+              <Label>Prompt</Label>
+              <Textarea
+                rows={3}
+                autoFocus
+                placeholder="e.g. a friendly illustration of a support engineer helping a customer, soft blue palette"
+                value={genPrompt}
+                onChange={(e) => setGenPrompt(e.target.value)}
+                disabled={generating}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Avoid asking for text inside the image — models render lettering unreliably. Put
+                wording in the email HTML instead.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">Style</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { k: "hero", label: "Email hero" },
+                  { k: "product", label: "Product shot" },
+                  { k: "illustration", label: "Illustration" },
+                  { k: "icon", label: "Icon" },
+                  { k: "background", label: "Background" },
+                  { k: "photo", label: "Photo" },
+                  { k: "none", label: "No preset" },
+                ].map((o) => (
+                  <button
+                    key={o.k}
+                    type="button"
+                    disabled={generating}
+                    onClick={() => setGenStyle(o.k)}
+                    className={cn(
+                      "rounded-full border px-2.5 py-1 text-xs transition-colors",
+                      genStyle === o.k ? "border-primary bg-primary/10 text-foreground" : "text-muted-foreground hover:bg-accent"
+                    )}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Shape</Label>
+                <Select value={genAspect} onValueChange={(v) => v && setGenAspect(v)} disabled={generating}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="banner">Email banner (wide 3:1)</SelectItem>
+                    <SelectItem value="landscape">Landscape (16:9)</SelectItem>
+                    <SelectItem value="square">Square (1:1)</SelectItem>
+                    <SelectItem value="portrait">Portrait (3:4)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">How many</Label>
+                <Select value={genCount} onValueChange={(v) => v && setGenCount(v)} disabled={generating}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["1", "2", "3", "4"].map((n) => (
+                      <SelectItem key={n} value={n}>{n} variation{n === "1" ? "" : "s"}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">Model</Label>
+              <Select value={genModel} onValueChange={(v) => v && setGenModel(v)} disabled={generating}>
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {models.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>{m.label} — {m.approxCost}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                {models.find((m) => m.id === genModel)?.note || ""}
+                {genCount !== "1" && " · cost applies per variation"}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                Shape is a request, not a guarantee — some models return a square regardless.
+                Resize in the email HTML if needed.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setGenOpen(false)} disabled={generating}>
+              Cancel
+            </Button>
+            <Button onClick={generate} disabled={generating || !genPrompt.trim()} className="gap-2">
+              {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+              {generating ? "Generating…" : "Generate"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent>

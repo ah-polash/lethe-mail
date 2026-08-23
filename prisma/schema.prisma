@@ -319,6 +319,9 @@ model MediaAsset {
   mimeType   String
   size       Int      // bytes
   altText    String?  // used when inserting into an email
+  source     String   @default("upload") // upload | ai
+  aiPrompt   String?  // prompt used, for AI-generated media (re-generate / audit)
+  aiModel    String?  // model that produced it
   createdBy  String
   creator    User     @relation(fields: [createdBy], references: [id])
   createdAt  DateTime @default(now())
