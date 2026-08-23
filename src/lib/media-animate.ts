@@ -8,6 +8,10 @@ import UPNG from "upng-js";
 
 export type OutputFormat = "png" | "gif" | "apng";
 
+// Milliseconds per frame. Shared with the browser preview so what you see before
+// saving runs at the same speed as the encoded file.
+export const FRAME_DELAY_MS = 120;
+
 export const OUTPUT_FORMATS: {
   key: OutputFormat;
   label: string;
@@ -59,7 +63,7 @@ export function encodeFrames(
   svgFrames: string[],
   format: OutputFormat,
   targetWidth: number,
-  frameDelayMs = 120
+  frameDelayMs = FRAME_DELAY_MS
 ): EncodedImage {
   if (svgFrames.length === 0) throw new Error("No frames to encode");
 

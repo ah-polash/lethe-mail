@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Image as ImageIcon, Upload, Search, Trash2, Copy, Check, Loader2,
-  FileText, Film, Code2, Pencil, Sparkles, Wand2, PenTool,
+  FileText, Film, Code2, Pencil, Sparkles, Wand2, PenTool, Play, Pause, Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,6 +55,52 @@ function KindIcon({ mimeType, className }: { mimeType: string; className?: strin
   return <ImageIcon className={className} />;
 }
 
+// Plays the generated keyframes as the real vector, not a rasterised file: each
+// frame is an <img> of the SVG itself (an img cannot run script, so this stays
+// safe) and all frames are mounted at once so swapping them never flickers.
+function VectorPreview({
+  frames,
+  delayMs,
+  alt,
+  playing,
+}: {
+  frames: string[];
+  delayMs: number;
+  alt: string;
+  playing: boolean;
+}) {
+  const [index, setIndex] = useState(0);
+  const sources = useMemo(
+    () => frames.map((f) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(f)}`),
+    [frames]
+  );
+
+  useEffect(() => {
+    if (!playing || sources.length < 2) return;
+    const t = setInterval(() => setIndex((i) => (i + 1) % sources.length), delayMs);
+    return () => clearInterval(t);
+  }, [playing, sources.length, delayMs]);
+
+  // Wraps rather than resetting, so a regenerated design with fewer frames
+  // cannot leave the index pointing past the end.
+  const current = sources.length ? index % sources.length : 0;
+
+  return (
+    <div className="relative w-full overflow-hidden rounded border bg-[repeating-conic-gradient(#e5e5e5_0_25%,transparent_0_50%)] bg-[length:16px_16px]">
+      {sources.map((src, i) => (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          key={i}
+          src={src}
+          alt={i === 0 ? alt : ""}
+          className={cn("w-full", i === 0 ? "block" : "absolute inset-0")}
+          style={{ visibility: i === current ? "visible" : "hidden" }}
+        />
+      ))}
+    </div>
+  );
+}
+
 export default function MediaLibraryPage() {
   const [assets, setAssets] = useState<MediaAsset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,10 +132,17 @@ export default function MediaLibraryPage() {
   const [vecEmailText, setVecEmailText] = useState("");
   const [vecStyle, setVecStyle] = useState("hero");
   const [vecAspect, setVecAspect] = useState("banner");
-  const [vecFormat, setVecFormat] = useState<"png" | "gif" | "apng">("png");
-  const [vecFrames, setVecFrames] = useState("6");
+  const [vecFrames, setVecFrames] = useState("1");
   const [vecBusy, setVecBusy] = useState(false);
-  const [vecResult, setVecResult] = useState<{ url: string; title: string; altText: string; dimensions: string } | null>(null);
+  const [vecPlaying, setVecPlaying] = useState(true);
+  const [vecSaving, setVecSaving] = useState<string | null>(null);
+  // The design is held in the browser until a format is chosen, so one drawing
+  // can be saved as a still and as an animation without generating twice.
+  const [vecDesign, setVecDesign] = useState<{
+    frames: string[]; title: string; altText: string; dimensions: string;
+    frameDelayMs: number; engine: string;
+  } | null>(null);
+  const [vecSaved, setVecSaved] = useState<Record<string, { url: string; name: string; size: number }>>({});
   const [sourceFilter, setSourceFilter] = useState<"all" | "ai" | "upload">("all");
 
   const load = useCallback(async () => {
@@ -127,30 +180,61 @@ export default function MediaLibraryPage() {
       return;
     }
     setVecBusy(true);
-    setVecResult(null);
+    setVecDesign(null);
+    setVecSaved({});
     try {
       const res = await fetch("/api/media/vector", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           emailText: vecEmailText, style: vecStyle, aspect: vecAspect,
-          format: vecFormat, frames: Number(vecFrames),
+          frames: Number(vecFrames),
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Vector generation failed");
-      setVecResult({
-        url: data.asset.url,
+      setVecDesign({
+        frames: data.frames || [],
         title: data.title,
         altText: data.altText,
-        dimensions: `${data.dimensions}${data.frameCount > 1 ? ` · ${data.frameCount} frames` : ""}`,
+        dimensions: `${data.dimensions}${data.frames?.length > 1 ? ` · ${data.frames.length} frames` : ""}`,
+        frameDelayMs: data.frameDelayMs || 120,
+        engine: data.engine,
       });
-      toast.success("Vector saved to your library");
-      await load();
+      setVecPlaying(true);
+      toast.success("Artwork ready — choose a format to save it");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Vector generation failed");
     } finally {
       setVecBusy(false);
+    }
+  };
+
+  const saveVector = async (format: "png" | "gif" | "apng") => {
+    if (!vecDesign) return;
+    setVecSaving(format);
+    try {
+      const res = await fetch("/api/media/vector/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          frames: vecDesign.frames, format, aspect: vecAspect,
+          title: vecDesign.title, altText: vecDesign.altText,
+          emailText: vecEmailText, engine: vecDesign.engine,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not save the artwork");
+      setVecSaved((prev) => ({
+        ...prev,
+        [format]: { url: data.asset.url, name: data.asset.name, size: data.size },
+      }));
+      toast.success(`Saved as ${data.label} · ${formatBytes(data.size)}`);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save the artwork");
+    } finally {
+      setVecSaving(null);
     }
   };
 
@@ -431,34 +515,117 @@ export default function MediaLibraryPage() {
 
 
       {/* Vector art derived from the email copy */}
-      <Dialog open={vecOpen} onOpenChange={(o) => { if (!vecBusy) { setVecOpen(o); if (!o) setVecResult(null); } }}>
+      <Dialog open={vecOpen} onOpenChange={(o) => { if (!vecBusy && !vecSaving) { setVecOpen(o); if (!o) { setVecDesign(null); setVecSaved({}); } } }}>
         <DialogContent className="max-w-[95vw] sm:max-w-[95vw] w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <PenTool className="h-5 w-5 text-primary" /> AI Vector generator
             </DialogTitle>
             <DialogDescription>
-              Paste your email text. Claude reads it, designs matching artwork, and saves it to your
-              library with a name and alt text — no API credits, exact dimensions.
+              Paste your email text. Claude reads it and designs matching artwork — preview the real
+              vector, then save it as a still PNG, an animated GIF or an animated PNG.
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-5 py-1 lg:grid-cols-[1.4fr_1fr]">
-            <div className="space-y-1.5">
-              <Label>Email text</Label>
-              <Textarea
-                rows={16}
-                autoFocus
-                className="font-mono text-xs"
-                placeholder={"Paste the subject line and body of your email here…\n\nThe illustration is designed from what the email is actually about, so more copy gives a better match."}
-                value={vecEmailText}
-                onChange={(e) => setVecEmailText(e.target.value)}
-                disabled={vecBusy}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                {vecEmailText.trim().length} characters
-                {vecEmailText.trim().length > 0 && vecEmailText.trim().length < 40 && " · paste a little more"}
-              </p>
+            <div className="space-y-3">
+              {vecDesign ? (
+                <>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{vecDesign.title}</p>
+                      <p className="text-[11px] text-muted-foreground">{vecDesign.dimensions} · live vector preview</p>
+                    </div>
+                    {vecDesign.frames.length > 1 && (
+                      <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={() => setVecPlaying((p) => !p)}>
+                        {vecPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                        {vecPlaying ? "Pause" : "Play"}
+                      </Button>
+                    )}
+                  </div>
+
+                  <VectorPreview
+                    frames={vecDesign.frames}
+                    delayMs={vecDesign.frameDelayMs}
+                    alt={vecDesign.altText}
+                    playing={vecPlaying}
+                  />
+
+                  <p className="text-[11px] text-muted-foreground">
+                    <span className="font-medium text-foreground">Alt text:</span> {vecDesign.altText}
+                  </p>
+
+                  <div className="space-y-2 rounded-lg border p-3">
+                    <p className="text-xs font-medium">Save to library as</p>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      {[
+                        { k: "png" as const, label: "Static PNG", note: "Renders everywhere." },
+                        { k: "gif" as const, label: "Animated GIF", note: "Outlook shows frame 1." },
+                        { k: "apng" as const, label: "Animated PNG", note: "Apple Mail animates it." },
+                      ].map((o) => {
+                        const saved = vecSaved[o.k];
+                        const unavailable = o.k !== "png" && vecDesign.frames.length < 2;
+                        return (
+                          <div key={o.k} className="space-y-1">
+                            <Button
+                              variant={saved ? "secondary" : "outline"}
+                              size="sm"
+                              className="w-full justify-start gap-1.5"
+                              disabled={!!vecSaving || unavailable}
+                              onClick={() => saveVector(o.k)}
+                            >
+                              {vecSaving === o.k ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : saved ? (
+                                <Check className="h-3.5 w-3.5 text-green-600" />
+                              ) : (
+                                <Save className="h-3.5 w-3.5" />
+                              )}
+                              {o.label}
+                            </Button>
+                            <p className="text-[10px] text-muted-foreground">
+                              {unavailable
+                                ? "Needs more than one frame"
+                                : saved
+                                ? `Saved · ${formatBytes(saved.size)}`
+                                : o.note}
+                            </p>
+                            {saved && (
+                              <button
+                                type="button"
+                                className="text-[10px] text-primary hover:underline"
+                                onClick={() => { navigator.clipboard.writeText(saved.url); toast.success("URL copied"); }}
+                              >
+                                Copy URL
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      Save as many formats as you like — the artwork is only drawn once.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-1.5">
+                  <Label>Email text</Label>
+                  <Textarea
+                    rows={16}
+                    autoFocus
+                    className="font-mono text-xs"
+                    placeholder={"Paste the subject line and body of your email here…\n\nThe illustration is designed from what the email is actually about, so more copy gives a better match."}
+                    value={vecEmailText}
+                    onChange={(e) => setVecEmailText(e.target.value)}
+                    disabled={vecBusy}
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    {vecEmailText.trim().length} characters
+                    {vecEmailText.trim().length > 0 && vecEmailText.trim().length < 40 && " · paste a little more"}
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="space-y-4">
@@ -489,47 +656,22 @@ export default function MediaLibraryPage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs">Output</Label>
-                <div className="grid gap-1.5">
-                  {[
-                    { k: "png" as const, label: "PNG (static)", note: "Renders everywhere — the safe default." },
-                    { k: "gif" as const, label: "Animated GIF", note: "Animates in most clients; Outlook shows frame 1. 256 colours." },
-                    { k: "apng" as const, label: "Animated PNG (APNG)", note: "Full colour, but only Apple Mail animates it." },
-                  ].map((o) => (
-                    <button
-                      key={o.k}
-                      type="button"
-                      disabled={vecBusy}
-                      onClick={() => setVecFormat(o.k)}
-                      className={cn(
-                        "rounded-lg border p-2 text-left transition-colors",
-                        vecFormat === o.k ? "border-primary bg-primary/5" : "hover:bg-accent"
-                      )}
-                    >
-                      <span className="block text-xs font-medium">{o.label}</span>
-                      <span className="block text-[10px] text-muted-foreground">{o.note}</span>
-                    </button>
-                  ))}
-                </div>
+                <Label className="text-xs">Motion</Label>
+                <Select value={vecFrames} onValueChange={(v) => v && setVecFrames(v)} disabled={vecBusy}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">Still image — one frame</SelectItem>
+                    {["3", "4", "6", "8"].map((n) => (
+                      <SelectItem key={n} value={n}>Animated loop — {n} frames</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  {vecFrames === "1"
+                    ? "A still can only be saved as a PNG. Pick an animated loop to unlock GIF and APNG."
+                    : "Each frame is drawn separately, so more frames means a smoother loop and a longer wait."}
+                </p>
               </div>
-
-              {vecFormat !== "png" && (
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Frames</Label>
-                  <Select value={vecFrames} onValueChange={(v) => v && setVecFrames(v)} disabled={vecBusy}>
-                    <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {["3", "4", "6", "8"].map((n) => (
-                        <SelectItem key={n} value={n}>{n} frames</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-[11px] text-muted-foreground">
-                    Each frame is drawn separately, so more frames means a smoother loop and a
-                    longer wait.
-                  </p>
-                </div>
-              )}
 
               <div className="space-y-1.5">
                 <Label className="text-xs">Shape</Label>
@@ -547,14 +689,19 @@ export default function MediaLibraryPage() {
                 </p>
               </div>
 
-              {vecResult ? (
-                <div className="space-y-2 rounded-lg border p-2.5">
-                  <p className="text-xs font-medium">Saved to library</p>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={vecResult.url} alt={vecResult.altText} className="w-full rounded border" />
-                  <p className="text-[11px]"><span className="text-muted-foreground">Name:</span> {vecResult.title}</p>
-                  <p className="text-[11px]"><span className="text-muted-foreground">Alt text:</span> {vecResult.altText}</p>
-                  <p className="text-[11px] text-muted-foreground">{vecResult.dimensions}</p>
+              {vecDesign ? (
+                <div className="space-y-1.5 rounded-md border bg-muted/40 p-2.5">
+                  <p className="text-[11px] font-medium">Email text used</p>
+                  <p className="max-h-24 overflow-y-auto text-[11px] text-muted-foreground whitespace-pre-wrap">
+                    {vecEmailText.slice(0, 400)}{vecEmailText.length > 400 ? "…" : ""}
+                  </p>
+                  <button
+                    type="button"
+                    className="text-[11px] text-primary hover:underline"
+                    onClick={() => { setVecDesign(null); setVecSaved({}); }}
+                  >
+                    Edit the text
+                  </button>
                 </div>
               ) : (
                 <p className="rounded-md border bg-muted/40 p-2.5 text-[11px] text-muted-foreground">
@@ -566,12 +713,12 @@ export default function MediaLibraryPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setVecOpen(false)} disabled={vecBusy}>
-              {vecResult ? "Done" : "Cancel"}
+            <Button variant="outline" onClick={() => setVecOpen(false)} disabled={vecBusy || !!vecSaving}>
+              {Object.keys(vecSaved).length > 0 ? "Done" : "Cancel"}
             </Button>
             <Button onClick={generateVector} disabled={vecBusy || vecEmailText.trim().length < 40} className="gap-2">
               {vecBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PenTool className="h-4 w-4" />}
-              {vecBusy ? "Designing…" : vecResult ? "Generate another" : "Generate vector"}
+              {vecBusy ? "Designing…" : vecDesign ? "Generate again" : "Generate vector"}
             </Button>
           </DialogFooter>
         </DialogContent>

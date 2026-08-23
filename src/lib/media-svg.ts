@@ -1,6 +1,5 @@
 import { Resvg } from "@resvg/resvg-js";
 import { runClaudeCli, resolveClaudeCli } from "./claude-cli";
-import { encodeFrames, type OutputFormat } from "./media-animate";
 
 // Claude cannot emit raster images, but it writes SVG well. So: ask the local
 // CLI for SVG markup, then rasterise it here to a PNG — which every email client
@@ -54,8 +53,9 @@ export function extractSvg(text: string): string | null {
 }
 
 // Defence in depth: the markup is rendered server-side and stored, so strip
-// anything active before it reaches the rasteriser.
-function sanitizeSvg(svg: string): string {
+// anything active before it reaches the rasteriser. Exported because frames make
+// a round trip through the browser for previewing and come back untrusted.
+export function sanitizeSvg(svg: string): string {
   return svg
     .replace(/<script[\s\S]*?<\/script>/gi, "")
     .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, "")
@@ -113,18 +113,14 @@ export async function generateImageViaCli(opts: {
 // sending and design artwork that matches it. One model call returns the title,
 // alt text and SVG together, so the whole thing costs a single round trip.
 
-export interface VectorFromEmail {
-  png: Buffer; // encoded output (PNG, GIF or APNG depending on the format)
-  svg: string; // first frame, kept for reference
+export interface VectorDesign {
+  frames: string[]; // sanitised SVG keyframes; one frame means a still image
   title: string;
   altText: string;
   width: number;
   height: number;
   costUsd: number;
   engine: string;
-  mimeType: string;
-  extension: string;
-  frameCount: number;
 }
 
 function buildEmailArtPrompt(
@@ -212,13 +208,11 @@ export async function generateVectorFromEmail(opts: {
   aspect?: string;
   model?: string;
   cliPath?: string | null;
-  format?: OutputFormat;
   frames?: number;
-}): Promise<VectorFromEmail> {
+}): Promise<VectorDesign> {
   const dims = SVG_DIMENSIONS[opts.aspect || "banner"] || SVG_DIMENSIONS.banner;
-  const format: OutputFormat = opts.format || "png";
-  // Animation asks the model for keyframes; more frames means a longer wait.
-  const frameCount = format === "png" ? 1 : Math.max(2, Math.min(8, opts.frames ?? 6));
+  // One frame is a still; more frames means a longer wait for a smoother loop.
+  const frameCount = Math.max(1, Math.min(8, opts.frames ?? 1));
   const prompt = buildEmailArtPrompt(opts.emailText, opts.style || "hero", dims.width, dims.height, frameCount);
 
   const result = await runClaudeCli({
@@ -243,28 +237,15 @@ export async function generateVectorFromEmail(opts: {
     throw new Error("The model did not return usable SVG. Try again, or shorten the email text.");
   }
 
-  const svgFrames = rawFrames.map(sanitizeSvg);
-  let encoded;
-  try {
-    encoded = encodeFrames(svgFrames, format, dims.width);
-  } catch (e) {
-    throw new Error(
-      `The generated artwork could not be rendered: ${e instanceof Error ? e.message : "unknown error"}`
-    );
-  }
-  const png = encoded.buffer;
-  const svg = svgFrames[0];
-
   const title = (parsed?.title || "email illustration").toString().trim().slice(0, 80);
-  const altText = (parsed?.altText || title).toString().trim().slice(0, 300);
 
   return {
-    png, svg, title, altText,
-    width: dims.width, height: dims.height,
+    frames: rawFrames.map(sanitizeSvg),
+    title,
+    altText: (parsed?.altText || title).toString().trim().slice(0, 300),
+    width: dims.width,
+    height: dims.height,
     costUsd: result.costUsd,
     engine: "local Claude CLI (vector)",
-    mimeType: encoded.mimeType,
-    extension: encoded.extension,
-    frameCount: encoded.frameCount,
   };
 }
