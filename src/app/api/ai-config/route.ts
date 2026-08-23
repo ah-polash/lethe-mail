@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { runClaudeCli, resolveClaudeCli } from "@/lib/claude-cli";
 
 function handleError(error: unknown) {
   const message = error instanceof Error ? error.message : "Internal server error";
@@ -61,6 +62,39 @@ export async function PUT() {
     const active = await prisma.aiConfig.findFirst({ where: { isActive: true } });
     if (!active) {
       return NextResponse.json({ error: "No active AI configuration found" }, { status: 400 });
+    }
+
+    // The local CLI has no endpoint or key to test — run it instead.
+    if (active.provider === "claude-cli") {
+      const cliPath = active.baseUrl?.startsWith("/") ? active.baseUrl : null;
+      const bin = resolveClaudeCli(cliPath);
+      if (!bin) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              "Claude CLI not found on this machine. Install Claude Code, or set the binary path above. (The deployed site cannot run a local CLI.)",
+          },
+          { status: 400 }
+        );
+      }
+      try {
+        const result = await runClaudeCli({
+          prompt: "Reply with exactly: OK",
+          model: active.model || undefined,
+          cliPath,
+          timeoutMs: 90_000,
+        });
+        return NextResponse.json({
+          success: true,
+          message: `Claude CLI is working (${bin}${result.model ? ` · ${result.model}` : ""})`,
+        });
+      } catch (e) {
+        return NextResponse.json(
+          { success: false, error: e instanceof Error ? e.message : "The Claude CLI test failed" },
+          { status: 400 }
+        );
+      }
     }
 
     const isAnthropic = active.provider === "anthropic";

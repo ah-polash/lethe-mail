@@ -36,17 +36,24 @@ export const STYLE_PRESETS: Record<string, string> = {
 };
 
 // Chat image models take no size parameter, so aspect is expressed in the prompt.
+// Providers validate this against a fixed list, so only values they accept may
+// be sent. "3:1" is NOT accepted — 4:1 is the closest wide-banner option.
+export const SUPPORTED_ASPECT_RATIOS = new Set([
+  "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3",
+  "4:5", "5:4", "8:1", "9:16", "16:9", "21:9",
+]);
+
 export const ASPECT_RATIOS: Record<string, string> = {
   square: "1:1",
   landscape: "16:9",
-  banner: "3:1",
+  banner: "4:1",
   portrait: "3:4",
 };
 
 export const ASPECTS: Record<string, string> = {
   square: "Square 1:1 composition.",
   landscape: "Wide 16:9 landscape composition.",
-  banner: "Very wide 3:1 email banner composition, short and wide.",
+  banner: "Very wide 4:1 email banner composition, short and wide.",
   portrait: "Vertical 3:4 portrait composition.",
 };
 
@@ -79,13 +86,19 @@ export async function generateImages(opts: {
   prompt: string;
   model?: string;
   count?: number;
-  aspectRatio?: string; // e.g. "3:1" — honoured by models that support it
-}): Promise<{ images: GeneratedImage[]; cost: number; model: string }> {
+  aspectRatio?: string; // e.g. "4:1" — support varies per model
+}): Promise<{ images: GeneratedImage[]; cost: number; model: string; aspectApplied: boolean }> {
   const apiKey = await getOpenRouterKey();
   const model = IMAGE_MODELS.some((m) => m.id === opts.model)
     ? (opts.model as string)
     : DEFAULT_IMAGE_MODEL;
   const count = Math.max(1, Math.min(4, opts.count ?? 1));
+
+  // Aspect-ratio support differs per model (e.g. 4:1 works on Gemini 3.1 but not
+  // 2.5 Flash). Rather than keep a brittle per-model table, ask for the ratio and
+  // retry once without it if the model rejects it — the prompt still describes
+  // the shape, so the user gets an image instead of an error.
+  let aspectApplied = !!(opts.aspectRatio && SUPPORTED_ASPECT_RATIOS.has(opts.aspectRatio));
 
   // One request per image: these models return a single image per completion,
   // and separate calls give genuinely different variations.
@@ -100,12 +113,44 @@ export async function generateImages(opts: {
           modalities: ["image", "text"],
           // Not every image model honours this; the prompt also states the
           // shape, and models that ignore both return a square.
-          ...(opts.aspectRatio ? { image_config: { aspect_ratio: opts.aspectRatio } } : {}),
+          ...(opts.aspectRatio && SUPPORTED_ASPECT_RATIOS.has(opts.aspectRatio)
+            ? { image_config: { aspect_ratio: opts.aspectRatio } }
+            : {}),
         }),
       });
-      const data = await res.json();
+      let data = await res.json();
       if (!res.ok) {
-        const providerMessage: string = data?.error?.message || "";
+        const firstMessage = JSON.stringify(data?.error?.message ?? data?.error ?? "");
+        if (/aspect_ratio/i.test(firstMessage)) {
+          // Retry without the unsupported ratio.
+          aspectApplied = false;
+          const retry = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model,
+              messages: [{ role: "user", content: opts.prompt }],
+              modalities: ["image", "text"],
+            }),
+          });
+          if (retry.ok) {
+            data = await retry.json();
+          } else {
+            const rd = await retry.json().catch(() => ({}));
+            throw new Error(
+              typeof rd?.error?.message === "string" ? rd.error.message : "Image generation failed"
+            );
+          }
+        }
+      }
+      if (!res.ok && !data?.choices) {
+        const rawError = data?.error?.message ?? data?.error ?? data;
+        const providerMessage: string =
+          typeof rawError === "string"
+            ? rawError
+            : Array.isArray(rawError)
+              ? rawError.map((e: { message?: string }) => e?.message).filter(Boolean).join("; ")
+              : JSON.stringify(rawError ?? {}).slice(0, 300);
         if (res.status === 402 || /credit/i.test(providerMessage)) {
           throw new Error(
             "OpenRouter credits are exhausted — top up at openrouter.ai/credits, then try again."
@@ -136,5 +181,6 @@ export async function generateImages(opts: {
     images: results.map((r) => r.image),
     cost: results.reduce((s, r) => s + r.cost, 0),
     model,
+    aspectApplied,
   };
 }

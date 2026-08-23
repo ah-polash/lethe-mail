@@ -76,6 +76,10 @@ export default function MediaLibraryPage() {
   const [genCount, setGenCount] = useState("1");
   const [generating, setGenerating] = useState(false);
   const [models, setModels] = useState<{ id: string; label: string; note: string; approxCost: string }[]>([]);
+  const [activeProvider, setActiveProvider] = useState<string | null>(null);
+  const [imageEngineAvailable, setImageEngineAvailable] = useState(true);
+  const [cliEngineAvailable, setCliEngineAvailable] = useState(false);
+  const [engine, setEngine] = useState<"openrouter" | "cli">("openrouter");
   const [sourceFilter, setSourceFilter] = useState<"all" | "ai" | "upload">("all");
 
   const load = useCallback(async () => {
@@ -96,7 +100,14 @@ export default function MediaLibraryPage() {
   useEffect(() => {
     fetch("/api/media/generate")
       .then((r) => r.json())
-      .then((d) => setModels(d.models || []))
+      .then((d) => {
+        setModels(d.models || []);
+        setActiveProvider(d.activeProvider ?? null);
+        setImageEngineAvailable(d.imageEngineAvailable !== false);
+        setCliEngineAvailable(!!d.cliEngineAvailable);
+        // Prefer the free local engine when the paid one is unavailable.
+        if (d.cliEngineAvailable && d.imageEngineAvailable === false) setEngine("cli");
+      })
       .catch(() => {});
   }, []);
 
@@ -109,13 +120,14 @@ export default function MediaLibraryPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: genPrompt, style: genStyle, aspect: genAspect,
-          model: genModel, count: Number(genCount),
+          model: genModel, count: Number(genCount), engine,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Generation failed");
       const n = data.assets?.length || 0;
       toast.success(`Generated ${n} image${n === 1 ? "" : "s"}${data.cost ? ` · $${Number(data.cost).toFixed(3)}` : ""}`);
+      if (data.notice) toast.info(data.notice);
       setGenOpen(false);
       await load();
     } catch (e) {
@@ -370,7 +382,7 @@ export default function MediaLibraryPage() {
 
       {/* AI image generator */}
       <Dialog open={genOpen} onOpenChange={(o) => !generating && setGenOpen(o)}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-[95vw] sm:max-w-[95vw] w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-primary" /> Generate an image
@@ -380,11 +392,11 @@ export default function MediaLibraryPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-1">
+          <div className="grid gap-5 py-1 lg:grid-cols-[1.3fr_1fr]">
             <div className="space-y-1.5">
               <Label>Prompt</Label>
               <Textarea
-                rows={3}
+                rows={10}
                 autoFocus
                 placeholder="e.g. a friendly illustration of a support engineer helping a customer, soft blue palette"
                 value={genPrompt}
@@ -397,6 +409,49 @@ export default function MediaLibraryPage() {
               </p>
             </div>
 
+            <div className="space-y-4">
+            {cliEngineAvailable && (
+              <div className="space-y-1.5">
+                <Label className="text-xs">Engine</Label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    disabled={generating}
+                    onClick={() => setEngine("openrouter")}
+                    className={cn(
+                      "rounded-lg border p-2 text-left text-xs transition-colors",
+                      engine === "openrouter" ? "border-primary bg-primary/5" : "hover:bg-accent"
+                    )}
+                  >
+                    <span className="block font-medium">AI image model</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      Photoreal, ~$0.04+/image
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={generating}
+                    onClick={() => setEngine("cli")}
+                    className={cn(
+                      "rounded-lg border p-2 text-left text-xs transition-colors",
+                      engine === "cli" ? "border-primary bg-primary/5" : "hover:bg-accent"
+                    )}
+                  >
+                    <span className="block font-medium">Vector (local Claude)</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      No API credits · exact size
+                    </span>
+                  </button>
+                </div>
+                {engine === "cli" && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Claude writes SVG artwork and it is rendered to PNG here — this uses your Claude
+                    subscription rather than API credits, and the shape is exact. Great for banners, backgrounds, patterns and icons;
+                    it cannot produce photographs or realistic people.
+                  </p>
+                )}
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label className="text-xs">Style</Label>
               <div className="flex flex-wrap gap-1.5">
@@ -451,6 +506,14 @@ export default function MediaLibraryPage() {
               </div>
             </div>
 
+            {engine === "cli" ? null : activeProvider === "claude-cli" ? (
+              <p className="rounded-md border bg-muted/40 p-2.5 text-[11px] text-muted-foreground">
+                Your active connection is the local Claude CLI, which cannot create images.
+                {imageEngineAvailable
+                  ? " Image generation will use your OpenRouter connection instead."
+                  : " Add an OpenRouter connection in Settings → AI Configuration to enable this."}
+              </p>
+            ) : (
             <div className="space-y-1.5">
               <Label className="text-xs">Model</Label>
               <Select value={genModel} onValueChange={(v) => v && setGenModel(v)} disabled={generating}>
@@ -470,13 +533,15 @@ export default function MediaLibraryPage() {
                 Resize in the email HTML if needed.
               </p>
             </div>
+            )}
+            </div>
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setGenOpen(false)} disabled={generating}>
               Cancel
             </Button>
-            <Button onClick={generate} disabled={generating || !genPrompt.trim()} className="gap-2">
+            <Button onClick={generate} disabled={generating || !genPrompt.trim() || (engine === "openrouter" && !imageEngineAvailable)} className="gap-2">
               {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
               {generating ? "Generating…" : "Generate"}
             </Button>
