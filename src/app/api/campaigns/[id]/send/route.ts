@@ -120,14 +120,29 @@ export async function POST(
         recipientEmails = Array.from(seenEmails);
 
         // Persist the resolved audience so later chunks skip the SwipeOne pull.
+        // Keep ONLY the fields this email actually interpolates: a full SwipeOne
+        // contact is ~1.3KB, so caching whole objects for a 13k segment produced
+        // an ~18MB row that every chunk re-read — which is how we exhausted the
+        // database's data-transfer quota. Storing just the used merge fields
+        // takes that to well under 1MB.
         if (recipientEmails.length > 0) {
+          const usedFields = new Set<string>();
+          for (const m of `${campaign.htmlContent} ${campaign.subject}`.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g)) {
+            usedFields.add(m[1]);
+          }
+
+          const slim = recipientEmails.map((email) => {
+            const full = contactByEmail.get(email) || {};
+            const contact: Record<string, unknown> = { email };
+            for (const f of usedFields) {
+              if (f !== "email" && full[f] !== undefined) contact[f] = full[f];
+            }
+            return { email, contact };
+          });
+
           await prisma.campaign.update({
             where: { id },
-            data: {
-              recipientEmails: JSON.stringify(
-                recipientEmails.map((email) => ({ email, contact: contactByEmail.get(email) || { email } }))
-              ),
-            },
+            data: { recipientEmails: JSON.stringify(slim) },
           });
         }
       }

@@ -231,8 +231,19 @@ export async function sendBulkEmails(
   let failed = 0;
   const errors: string[] = [];
 
-  for (let i = 0; i < emails.length; i++) {
-    const email = emails[i];
+  // Send with a small worker pool. Sequentially this managed ~1.2 emails/sec —
+  // every iteration waits on SES *and* a round trip to a remote database — so a
+  // 13k campaign took hours. Concurrency stays far below the SES send rate, and
+  // each worker records its own event immediately after its own send (events are
+  // never batched), so a crash can lose at most the few in flight.
+  const CONCURRENCY = Math.max(1, Math.min(10, Math.floor(ratePerSecond)));
+  let cursor = 0;
+
+  async function worker(): Promise<void> {
+    for (;;) {
+      const i = cursor++;
+      if (i >= emails.length) return;
+      const email = emails[i];
     const result = await sendEmail({
       to: [email.to],
       subject: email.subject,
@@ -270,11 +281,10 @@ export async function sendBulkEmails(
       });
     }
 
-    // Rate limiting
-    if ((i + 1) % ratePerSecond === 0) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
+
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
 
   return { sent, failed, errors };
 }
