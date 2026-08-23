@@ -132,7 +132,8 @@ export default function MediaLibraryPage() {
   const [vecEmailText, setVecEmailText] = useState("");
   const [vecStyle, setVecStyle] = useState("hero");
   const [vecAspect, setVecAspect] = useState("banner");
-  const [vecFrames, setVecFrames] = useState("1");
+  const [vecMotion, setVecMotion] = useState<"static" | "animated">("static");
+  const [vecFrames, setVecFrames] = useState("6");
   const [vecBusy, setVecBusy] = useState(false);
   const [vecPlaying, setVecPlaying] = useState(true);
   const [vecSaving, setVecSaving] = useState<string | null>(null);
@@ -188,7 +189,7 @@ export default function MediaLibraryPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           emailText: vecEmailText, style: vecStyle, aspect: vecAspect,
-          frames: Number(vecFrames),
+          frames: vecMotion === "static" ? 1 : Number(vecFrames),
         }),
       });
       const data = await res.json();
@@ -522,8 +523,8 @@ export default function MediaLibraryPage() {
               <PenTool className="h-5 w-5 text-primary" /> AI Vector generator
             </DialogTitle>
             <DialogDescription>
-              Paste your email text. Claude reads it and designs matching artwork — preview the real
-              vector, then save it as a still PNG, an animated GIF or an animated PNG.
+              Paste your email text and choose static or animated. Claude reads the email and designs
+              matching artwork — preview the real vector, then save it to your library.
             </DialogDescription>
           </DialogHeader>
 
@@ -557,21 +558,23 @@ export default function MediaLibraryPage() {
 
                   <div className="space-y-2 rounded-lg border p-3">
                     <p className="text-xs font-medium">Save to library as</p>
-                    <div className="grid gap-2 sm:grid-cols-3">
-                      {[
-                        { k: "png" as const, label: "Static PNG", note: "Renders everywhere." },
-                        { k: "gif" as const, label: "Animated GIF", note: "Outlook shows frame 1." },
-                        { k: "apng" as const, label: "Animated PNG", note: "Apple Mail animates it." },
-                      ].map((o) => {
+                    <div className={cn("grid gap-2", vecDesign.frames.length > 1 ? "sm:grid-cols-3" : "sm:max-w-xs")}>
+                      {(vecDesign.frames.length > 1
+                        ? [
+                            { k: "gif" as const, label: "Animated GIF", note: "Outlook shows frame 1." },
+                            { k: "apng" as const, label: "Animated PNG", note: "Apple Mail animates it." },
+                            { k: "png" as const, label: "Static PNG", note: "First frame only — renders everywhere." },
+                          ]
+                        : [{ k: "png" as const, label: "Static PNG", note: "Renders everywhere." }]
+                      ).map((o) => {
                         const saved = vecSaved[o.k];
-                        const unavailable = o.k !== "png" && vecDesign.frames.length < 2;
                         return (
                           <div key={o.k} className="space-y-1">
                             <Button
                               variant={saved ? "secondary" : "outline"}
                               size="sm"
                               className="w-full justify-start gap-1.5"
-                              disabled={!!vecSaving || unavailable}
+                              disabled={!!vecSaving}
                               onClick={() => saveVector(o.k)}
                             >
                               {vecSaving === o.k ? (
@@ -584,11 +587,7 @@ export default function MediaLibraryPage() {
                               {o.label}
                             </Button>
                             <p className="text-[10px] text-muted-foreground">
-                              {unavailable
-                                ? "Needs more than one frame"
-                                : saved
-                                ? `Saved · ${formatBytes(saved.size)}`
-                                : o.note}
+                              {saved ? `Saved · ${formatBytes(saved.size)}` : o.note}
                             </p>
                             {saved && (
                               <button
@@ -603,9 +602,11 @@ export default function MediaLibraryPage() {
                         );
                       })}
                     </div>
-                    <p className="text-[10px] text-muted-foreground">
-                      Save as many formats as you like — the artwork is only drawn once.
-                    </p>
+                    {vecDesign.frames.length > 1 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Save as many formats as you like — the artwork is only drawn once.
+                      </p>
+                    )}
                   </div>
                 </>
               ) : (
@@ -656,22 +657,46 @@ export default function MediaLibraryPage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs">Motion</Label>
-                <Select value={vecFrames} onValueChange={(v) => v && setVecFrames(v)} disabled={vecBusy}>
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">Still image — one frame</SelectItem>
-                    {["3", "4", "6", "8"].map((n) => (
-                      <SelectItem key={n} value={n}>Animated loop — {n} frames</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-[11px] text-muted-foreground">
-                  {vecFrames === "1"
-                    ? "A still can only be saved as a PNG. Pick an animated loop to unlock GIF and APNG."
-                    : "Each frame is drawn separately, so more frames means a smoother loop and a longer wait."}
-                </p>
+                <Label className="text-xs">Type</Label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {[
+                    { k: "static" as const, label: "Static", note: "One drawing, saved as PNG." },
+                    { k: "animated" as const, label: "Animated", note: "A looping sequence — GIF or APNG." },
+                  ].map((o) => (
+                    <button
+                      key={o.k}
+                      type="button"
+                      disabled={vecBusy}
+                      onClick={() => setVecMotion(o.k)}
+                      className={cn(
+                        "rounded-lg border p-2 text-left transition-colors",
+                        vecMotion === o.k ? "border-primary bg-primary/5" : "hover:bg-accent"
+                      )}
+                    >
+                      <span className="block text-xs font-medium">{o.label}</span>
+                      <span className="block text-[10px] text-muted-foreground">{o.note}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              {vecMotion === "animated" && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Frames</Label>
+                  <Select value={vecFrames} onValueChange={(v) => v && setVecFrames(v)} disabled={vecBusy}>
+                    <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {["3", "4", "6", "8"].map((n) => (
+                        <SelectItem key={n} value={n}>{n} frames</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Each frame is drawn separately, so more frames means a smoother loop and a
+                    longer wait.
+                  </p>
+                </div>
+              )}
 
               <div className="space-y-1.5">
                 <Label className="text-xs">Shape</Label>
