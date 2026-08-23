@@ -29,7 +29,8 @@ export async function POST(request: NextRequest) {
 
     const { name, provider, apiKey, model, baseUrl } = await request.json();
 
-    if (!apiKey) {
+    // The local Claude CLI authenticates itself — no key to store.
+    if (!apiKey && provider !== "claude-cli") {
       return NextResponse.json({ error: "API key is required" }, { status: 400 });
     }
 
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest) {
       data: {
         name: name || "Default",
         provider: provider || "openrouter",
-        apiKey,
+        apiKey: apiKey || "",
         model: model || "google/gemini-2.0-flash-001",
         baseUrl: baseUrl || "https://openrouter.ai/api/v1",
         isActive: existingCount === 0,

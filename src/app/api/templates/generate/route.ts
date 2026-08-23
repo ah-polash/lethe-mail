@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { runClaudeCli } from "@/lib/claude-cli";
 
 // Best-effort extraction of { html, subject } from an LLM response that may not be strict JSON.
 // Returns html (and optional subject) on success, null if nothing usable was found.
@@ -305,13 +306,34 @@ export async function POST(request: NextRequest) {
     // instead of silently returning a generic fallback template.
     let aiError: string | null = null;
 
-    if (apiKey) {
+    // The local CLI authenticates itself (Claude subscription), so it runs even
+    // with no API key stored.
+    if (apiKey || provider === "claude-cli") {
       const systemPrompt = referenceImageUrl
         ? `You are an expert email template designer. The user has provided a screenshot of an email design as a reference. Analyze the screenshot carefully and recreate a similar email template in HTML. Match the layout, colors, typography, spacing, and overall design as closely as possible. Adapt the content based on the user's prompt. The style should be "${style || "general"}". Return a JSON object with two fields: "html" (the complete HTML email template with all styles inline for email client compatibility) and "subject" (a suggested email subject line). Only return valid JSON, no markdown.`
         : `You are an expert email template designer. Generate a professional, responsive HTML email template based on the user's prompt. The style should be "${style || "general"}". Return a JSON object with two fields: "html" (the complete HTML email template) and "subject" (a suggested email subject line). The HTML should be inline-styled for maximum email client compatibility. Make the design modern, clean, and professional. Only return valid JSON, no markdown.`;
 
       try {
-        if (provider === "anthropic") {
+        if (provider === "claude-cli") {
+          // Local Claude Code CLI, headless. Only works where the binary exists
+          // (a dev machine or self-hosted server) — never on serverless.
+          const result = await runClaudeCli({
+            prompt: referenceImageUrl
+              ? `${prompt}\n\nReference screenshot: ${referenceImageUrl}`
+              : prompt,
+            systemPrompt,
+            model: aiConfig?.model || undefined,
+            // baseUrl doubles as the binary path for this provider.
+            cliPath: aiConfig?.baseUrl && aiConfig.baseUrl.startsWith("/") ? aiConfig.baseUrl : null,
+          });
+          const parsed = extractHtmlAndSubject(result.text);
+          if (parsed) {
+            generatedHtml = parsed.html;
+            generatedSubject = parsed.subject || null;
+          } else {
+            aiError = "The Claude CLI returned no usable HTML.";
+          }
+        } else if (provider === "anthropic") {
           // Anthropic /messages — system is top-level, response has content[0].text
           const userContent: unknown = referenceImageUrl
             ? [
@@ -324,7 +346,7 @@ export async function POST(request: NextRequest) {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              "x-api-key": apiKey,
+              "x-api-key": apiKey || "",
               "anthropic-version": "2023-06-01",
             },
             body: JSON.stringify({
@@ -374,7 +396,7 @@ export async function POST(request: NextRequest) {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${apiKey}`,
+              Authorization: `Bearer ${apiKey || ""}`,
               ...(provider === "openrouter" && {
                 "HTTP-Referer": process.env.NEXTAUTH_URL || "http://localhost:3000",
                 "X-Title": "Lethe Mail",

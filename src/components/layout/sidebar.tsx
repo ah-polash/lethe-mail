@@ -200,7 +200,7 @@ function NavContent({
           )}
         >
           <MessageSquareWarning className="h-4 w-4" />
-          Bug report &amp; Feature request
+          Bugs / Feature request
         </Link>
         <Link
           href="/whats-new"

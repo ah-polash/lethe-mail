@@ -849,7 +849,8 @@ export function SettingsView() {
   };
 
   const handleSaveAi = async () => {
-    if (!aiForm.apiKey) {
+    // The local CLI authenticates itself, so it is the one provider with no key.
+    if (!aiForm.apiKey && aiForm.provider !== "claude-cli") {
       toast.error("API key is required");
       return;
     }
@@ -2497,10 +2498,31 @@ export function SettingsView() {
                         <SelectItem value="openrouter">OpenRouter</SelectItem>
                         <SelectItem value="openai">OpenAI</SelectItem>
                         <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
+                        <SelectItem value="claude-cli">Local Claude CLI (no API key)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
+                {aiForm.provider === "claude-cli" ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="ai-cli-path">Claude CLI path (optional)</Label>
+                    <Input
+                      id="ai-cli-path"
+                      placeholder="Leave empty to auto-detect (~/.local/bin/claude)"
+                      value={aiForm.baseUrl}
+                      onChange={(e) => setAiForm({ ...aiForm, baseUrl: e.target.value })}
+                    />
+                    <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-400">
+                      <p className="font-medium">Runs on the machine hosting this app</p>
+                      <p className="mt-1 text-muted-foreground">
+                        It uses your Claude Code subscription instead of API credits, so no API key
+                        is needed. This works when you run the app locally or on your own server —
+                        the deployed site on Vercel cannot start a local process, so generation
+                        there will fail with a clear error. Keep an API-based connection for production.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
                 <div className="space-y-2">
                   <Label htmlFor="ai-api-key">API Key</Label>
                   <div className="relative">
@@ -2544,10 +2566,26 @@ export function SettingsView() {
                     </p>
                   )}
                 </div>
+                )}
                 <div className="grid gap-4 grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="ai-model">Model</Label>
-                    {aiForm.provider === "anthropic" ? (
+                    {aiForm.provider === "claude-cli" ? (
+                      <Select
+                        value={aiForm.model || "__default__"}
+                        onValueChange={(v) => setAiForm({ ...aiForm, model: v === "__default__" ? "" : v || "" })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__default__">Use the CLI&apos;s default model</SelectItem>
+                          <SelectItem value="claude-opus-4-7">Claude Opus 4.7 — most capable</SelectItem>
+                          <SelectItem value="claude-sonnet-4-6">Claude Sonnet 4.6 — recommended</SelectItem>
+                          <SelectItem value="claude-haiku-4-5-20251001">Claude Haiku 4.5 — fastest</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : aiForm.provider === "anthropic" ? (
                       <Select
                         value={aiForm.model}
                         onValueChange={(v) => setAiForm({ ...aiForm, model: v || "claude-sonnet-4-6" })}

@@ -247,7 +247,7 @@ export default function FeedbackPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <MessageSquareWarning className="h-6 w-6" /> Bug report &amp; Feature request
+            <MessageSquareWarning className="h-6 w-6" /> Bugs / Feature request
           </h1>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
