@@ -211,7 +211,7 @@ export default function MediaLibraryPage() {
     }
   };
 
-  const saveVector = async (format: "png" | "gif" | "apng") => {
+  const saveVector = async (format: "png" | "jpg" | "gif" | "apng") => {
     if (!vecDesign) return;
     setVecSaving(format);
     try {
@@ -558,14 +558,18 @@ export default function MediaLibraryPage() {
 
                   <div className="space-y-2 rounded-lg border p-3">
                     <p className="text-xs font-medium">Save to library as</p>
-                    <div className={cn("grid gap-2", vecDesign.frames.length > 1 ? "sm:grid-cols-3" : "sm:max-w-xs")}>
+                    <div className={cn("grid gap-2 sm:grid-cols-2", vecDesign.frames.length > 1 ? "lg:grid-cols-4" : "sm:max-w-md")}>
                       {(vecDesign.frames.length > 1
                         ? [
                             { k: "gif" as const, label: "Animated GIF", note: "Outlook shows frame 1." },
                             { k: "apng" as const, label: "Animated PNG", note: "Apple Mail animates it." },
-                            { k: "png" as const, label: "Static PNG", note: "First frame only — renders everywhere." },
+                            { k: "png" as const, label: "Static PNG", note: "First frame — renders everywhere." },
+                            { k: "jpg" as const, label: "Static JPEG", note: "First frame, smallest file." },
                           ]
-                        : [{ k: "png" as const, label: "Static PNG", note: "Renders everywhere." }]
+                        : [
+                            { k: "png" as const, label: "Static PNG", note: "Renders everywhere." },
+                            { k: "jpg" as const, label: "Static JPEG", note: "Much smaller, no transparency." },
+                          ]
                       ).map((o) => {
                         const saved = vecSaved[o.k];
                         return (
@@ -660,7 +664,7 @@ export default function MediaLibraryPage() {
                 <Label className="text-xs">Type</Label>
                 <div className="grid grid-cols-2 gap-1.5">
                   {[
-                    { k: "static" as const, label: "Static", note: "One drawing, saved as PNG." },
+                    { k: "static" as const, label: "Static", note: "One drawing — PNG or JPEG." },
                     { k: "animated" as const, label: "Animated", note: "A looping sequence — GIF or APNG." },
                   ].map((o) => (
                     <button

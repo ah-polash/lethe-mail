@@ -1,16 +1,20 @@
 import { Resvg } from "@resvg/resvg-js";
 import { GIFEncoder, quantize, applyPalette } from "gifenc";
 import UPNG from "upng-js";
+import jpeg from "jpeg-js";
 
 // resvg renders a single static frame — it does not run SMIL animation. So for
 // animated output we ask the model for a sequence of SVG keyframes, rasterise
 // each one, and encode the frames into a GIF or APNG here.
 
-export type OutputFormat = "png" | "gif" | "apng";
+export type OutputFormat = "png" | "jpg" | "gif" | "apng";
 
 // Milliseconds per frame. Shared with the browser preview so what you see before
 // saving runs at the same speed as the encoded file.
 export const FRAME_DELAY_MS = 120;
+
+// High enough that gradients stay clean; low enough to be worth choosing over PNG.
+const JPEG_QUALITY = 88;
 
 export const OUTPUT_FORMATS: {
   key: OutputFormat;
@@ -27,6 +31,14 @@ export const OUTPUT_FORMATS: {
     extension: "png",
     animated: false,
     note: "Renders everywhere. The safe default for email.",
+  },
+  {
+    key: "jpg",
+    label: "JPEG",
+    mimeType: "image/jpeg",
+    extension: "jpg",
+    animated: false,
+    note: "Much smaller than PNG, but no transparency — flattened onto white.",
   },
   {
     key: "gif",
@@ -53,6 +65,20 @@ export interface EncodedImage {
   frameCount: number;
 }
 
+// JPEG has no alpha channel, and jpeg-js reads transparent pixels as black, so
+// anything see-through is composited onto white first.
+function flattenOnWhite(rgba: Buffer): Buffer {
+  const out = Buffer.allocUnsafe(rgba.length);
+  for (let i = 0; i < rgba.length; i += 4) {
+    const a = rgba[i + 3] / 255;
+    out[i] = Math.round(rgba[i] * a + 255 * (1 - a));
+    out[i + 1] = Math.round(rgba[i + 1] * a + 255 * (1 - a));
+    out[i + 2] = Math.round(rgba[i + 2] * a + 255 * (1 - a));
+    out[i + 3] = 255;
+  }
+  return out;
+}
+
 function renderFrame(svg: string, width: number): { rgba: Buffer; width: number; height: number } {
   const img = new Resvg(svg, { fitTo: { mode: "width", value: width } }).render();
   return { rgba: Buffer.from(img.pixels), width: img.width, height: img.height };
@@ -67,15 +93,26 @@ export function encodeFrames(
 ): EncodedImage {
   if (svgFrames.length === 0) throw new Error("No frames to encode");
 
-  // Static output only ever needs the first frame.
-  if (format === "png" || svgFrames.length === 1) {
-    const png = new Resvg(svgFrames[0], { fitTo: { mode: "width", value: targetWidth } })
-      .render()
-      .asPng();
+  const spec = OUTPUT_FORMATS.find((f) => f.key === format) || OUTPUT_FORMATS[0];
+
+  // Still output needs only the first frame — as does an animated format that
+  // was somehow handed a single frame.
+  if (!spec.animated || svgFrames.length === 1) {
+    const still = spec.animated ? OUTPUT_FORMATS[0] : spec;
+    const image = new Resvg(svgFrames[0], { fitTo: { mode: "width", value: targetWidth } }).render();
+    const buffer =
+      still.key === "jpg"
+        ? Buffer.from(
+            jpeg.encode(
+              { data: flattenOnWhite(Buffer.from(image.pixels)), width: image.width, height: image.height },
+              JPEG_QUALITY
+            ).data
+          )
+        : Buffer.from(image.asPng());
     return {
-      buffer: Buffer.from(png),
-      mimeType: "image/png",
-      extension: "png",
+      buffer,
+      mimeType: still.mimeType,
+      extension: still.extension,
       frameCount: 1,
     };
   }

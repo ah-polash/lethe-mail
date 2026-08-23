@@ -28,6 +28,7 @@
     "date-fns": "^4.1.0",
     "dotenv": "^17.3.1",
     "gifenc": "^1.0.3",
+    "jpeg-js": "^0.4.4",
     "js-beautify": "^1.15.4",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.577.0",
