@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Image as ImageIcon, Upload, Search, Trash2, Copy, Check, Loader2,
-  FileText, Film, Code2, Pencil, Sparkles, Wand2, PenTool, Play, Pause, Save,
+  FileText, Film, Code2, Pencil, Sparkles, PenTool, Play, Pause, Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -113,20 +113,6 @@ export default function MediaLibraryPage() {
   const [editAlt, setEditAlt] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // AI generator
-  const [genOpen, setGenOpen] = useState(false);
-  const [genPrompt, setGenPrompt] = useState("");
-  const [genStyle, setGenStyle] = useState("hero");
-  const [genAspect, setGenAspect] = useState("banner");
-  const [genModel, setGenModel] = useState("google/gemini-2.5-flash-image");
-  const [genCount, setGenCount] = useState("1");
-  const [generating, setGenerating] = useState(false);
-  const [models, setModels] = useState<{ id: string; label: string; note: string; approxCost: string }[]>([]);
-  const [activeProvider, setActiveProvider] = useState<string | null>(null);
-  const [imageEngineAvailable, setImageEngineAvailable] = useState(true);
-  const [cliEngineAvailable, setCliEngineAvailable] = useState(false);
-  const [engine, setEngine] = useState<"openrouter" | "cli">("openrouter");
-
   // Vector-from-email generator
   const [vecOpen, setVecOpen] = useState(false);
   const [vecEmailText, setVecEmailText] = useState("");
@@ -144,6 +130,7 @@ export default function MediaLibraryPage() {
     frameDelayMs: number; engine: string;
   } | null>(null);
   const [vecSaved, setVecSaved] = useState<Record<string, { url: string; name: string; size: number }>>({});
+  const [vectorEngineAvailable, setVectorEngineAvailable] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<"all" | "ai" | "upload">("all");
 
   const load = useCallback(async () => {
@@ -162,16 +149,9 @@ export default function MediaLibraryPage() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    fetch("/api/media/generate")
+    fetch("/api/media/vector")
       .then((r) => r.json())
-      .then((d) => {
-        setModels(d.models || []);
-        setActiveProvider(d.activeProvider ?? null);
-        setImageEngineAvailable(d.imageEngineAvailable !== false);
-        setCliEngineAvailable(!!d.cliEngineAvailable);
-        // Prefer the free local engine when the paid one is unavailable.
-        if (d.cliEngineAvailable && d.imageEngineAvailable === false) setEngine("cli");
-      })
+      .then((d) => setVectorEngineAvailable(!!d.available))
       .catch(() => {});
   }, []);
 
@@ -239,31 +219,6 @@ export default function MediaLibraryPage() {
     }
   };
 
-  const generate = async () => {
-    if (!genPrompt.trim()) { toast.error("Describe the image you want"); return; }
-    setGenerating(true);
-    try {
-      const res = await fetch("/api/media/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: genPrompt, style: genStyle, aspect: genAspect,
-          model: genModel, count: Number(genCount), engine,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Generation failed");
-      const n = data.assets?.length || 0;
-      toast.success(`Generated ${n} image${n === 1 ? "" : "s"}${data.cost ? ` · $${Number(data.cost).toFixed(3)}` : ""}`);
-      if (data.notice) toast.info(data.notice);
-      setGenOpen(false);
-      await load();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Generation failed");
-    } finally {
-      setGenerating(false);
-    }
-  };
 
   const uploadFiles = useCallback(async (files: FileList | File[]) => {
     const list = Array.from(files);
@@ -376,16 +331,12 @@ export default function MediaLibraryPage() {
             accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml,application/pdf,video/mp4,video/webm"
             onChange={(e) => { if (e.target.files) uploadFiles(e.target.files); e.target.value = ""; }}
           />
-          {cliEngineAvailable && (
+          {vectorEngineAvailable && (
             <Button variant="outline" onClick={() => setVecOpen(true)} className="gap-2">
               <PenTool className="h-4 w-4" />
               AI Vector generator
             </Button>
           )}
-          <Button variant="outline" onClick={() => setGenOpen(true)} className="gap-2">
-            <Sparkles className="h-4 w-4" />
-            Generate with AI
-          </Button>
           <Button onClick={() => fileRef.current?.click()} disabled={uploading > 0} className="gap-2">
             {uploading > 0 ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
             {uploading > 0 ? `Uploading ${uploading}…` : "Upload"}
@@ -748,175 +699,6 @@ export default function MediaLibraryPage() {
             <Button onClick={generateVector} disabled={vecBusy || vecEmailText.trim().length < 40} className="gap-2">
               {vecBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PenTool className="h-4 w-4" />}
               {vecBusy ? "Designing…" : vecDesign ? "Generate again" : "Generate vector"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* AI image generator */}
-      <Dialog open={genOpen} onOpenChange={(o) => !generating && setGenOpen(o)}>
-        <DialogContent className="max-w-[95vw] sm:max-w-[95vw] w-[95vw] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-primary" /> Generate an image
-            </DialogTitle>
-            <DialogDescription>
-              Describe what you want. Generated images are added straight to your library.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="grid gap-5 py-1 lg:grid-cols-[1.3fr_1fr]">
-            <div className="space-y-1.5">
-              <Label>Prompt</Label>
-              <Textarea
-                rows={10}
-                autoFocus
-                placeholder="e.g. a friendly illustration of a support engineer helping a customer, soft blue palette"
-                value={genPrompt}
-                onChange={(e) => setGenPrompt(e.target.value)}
-                disabled={generating}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Avoid asking for text inside the image — models render lettering unreliably. Put
-                wording in the email HTML instead.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-            {cliEngineAvailable && (
-              <div className="space-y-1.5">
-                <Label className="text-xs">Engine</Label>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    disabled={generating}
-                    onClick={() => setEngine("openrouter")}
-                    className={cn(
-                      "rounded-lg border p-2 text-left text-xs transition-colors",
-                      engine === "openrouter" ? "border-primary bg-primary/5" : "hover:bg-accent"
-                    )}
-                  >
-                    <span className="block font-medium">AI image model</span>
-                    <span className="text-[10px] text-muted-foreground">
-                      Photoreal, ~$0.04+/image
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={generating}
-                    onClick={() => setEngine("cli")}
-                    className={cn(
-                      "rounded-lg border p-2 text-left text-xs transition-colors",
-                      engine === "cli" ? "border-primary bg-primary/5" : "hover:bg-accent"
-                    )}
-                  >
-                    <span className="block font-medium">Vector (local Claude)</span>
-                    <span className="text-[10px] text-muted-foreground">
-                      No API credits · exact size
-                    </span>
-                  </button>
-                </div>
-                {engine === "cli" && (
-                  <p className="text-[11px] text-muted-foreground">
-                    Claude writes SVG artwork and it is rendered to PNG here — this uses your Claude
-                    subscription rather than API credits, and the shape is exact. Great for banners, backgrounds, patterns and icons;
-                    it cannot produce photographs or realistic people.
-                  </p>
-                )}
-              </div>
-            )}
-            <div className="space-y-1.5">
-              <Label className="text-xs">Style</Label>
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  { k: "hero", label: "Email hero" },
-                  { k: "product", label: "Product shot" },
-                  { k: "illustration", label: "Illustration" },
-                  { k: "icon", label: "Icon" },
-                  { k: "background", label: "Background" },
-                  { k: "photo", label: "Photo" },
-                  { k: "none", label: "No preset" },
-                ].map((o) => (
-                  <button
-                    key={o.k}
-                    type="button"
-                    disabled={generating}
-                    onClick={() => setGenStyle(o.k)}
-                    className={cn(
-                      "rounded-full border px-2.5 py-1 text-xs transition-colors",
-                      genStyle === o.k ? "border-primary bg-primary/10 text-foreground" : "text-muted-foreground hover:bg-accent"
-                    )}
-                  >
-                    {o.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Shape</Label>
-                <Select value={genAspect} onValueChange={(v) => v && setGenAspect(v)} disabled={generating}>
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="banner">Email banner (wide 3:1)</SelectItem>
-                    <SelectItem value="landscape">Landscape (16:9)</SelectItem>
-                    <SelectItem value="square">Square (1:1)</SelectItem>
-                    <SelectItem value="portrait">Portrait (3:4)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">How many</Label>
-                <Select value={genCount} onValueChange={(v) => v && setGenCount(v)} disabled={generating}>
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {["1", "2", "3", "4"].map((n) => (
-                      <SelectItem key={n} value={n}>{n} variation{n === "1" ? "" : "s"}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {engine === "cli" ? null : activeProvider === "claude-cli" ? (
-              <p className="rounded-md border bg-muted/40 p-2.5 text-[11px] text-muted-foreground">
-                Your active connection is the local Claude CLI, which cannot create images.
-                {imageEngineAvailable
-                  ? " Image generation will use your OpenRouter connection instead."
-                  : " Add an OpenRouter connection in Settings → AI Configuration to enable this."}
-              </p>
-            ) : (
-            <div className="space-y-1.5">
-              <Label className="text-xs">Model</Label>
-              <Select value={genModel} onValueChange={(v) => v && setGenModel(v)} disabled={generating}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {models.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>{m.label} — {m.approxCost}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-[11px] text-muted-foreground">
-                {models.find((m) => m.id === genModel)?.note || ""}
-                {genCount !== "1" && " · cost applies per variation"}
-              </p>
-              <p className="text-[11px] text-muted-foreground">
-                Shape is a request, not a guarantee — some models return a square regardless.
-                Resize in the email HTML if needed.
-              </p>
-            </div>
-            )}
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setGenOpen(false)} disabled={generating}>
-              Cancel
-            </Button>
-            <Button onClick={generate} disabled={generating || !genPrompt.trim() || (engine === "openrouter" && !imageEngineAvailable)} className="gap-2">
-              {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-              {generating ? "Generating…" : "Generate"}
             </Button>
           </DialogFooter>
         </DialogContent>
