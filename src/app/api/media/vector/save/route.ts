@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { publicAssetUrl } from "@/lib/r2";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { sanitizeSvg, SVG_DIMENSIONS } from "@/lib/media-svg";
 import { encodeFrames, OUTPUT_FORMATS, type OutputFormat } from "@/lib/media-animate";
@@ -93,7 +94,7 @@ export async function POST(request: NextRequest) {
       data: {
         name: `${slug}.${encoded.extension}`,
         key,
-        url: `${r2.publicUrl.replace(/\/+$/, "")}/${key}`,
+        url: publicAssetUrl(r2.publicUrl, key),
         mimeType: encoded.mimeType,
         size: encoded.buffer.length,
         // The model's own description — meaningful alt text rather than the raw prompt.

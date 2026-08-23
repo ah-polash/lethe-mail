@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { publicAssetUrl } from "@/lib/r2";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 
 function handleError(error: unknown) {
@@ -94,7 +95,7 @@ export async function POST(request: NextRequest) {
       data: {
         name: safeName,
         key,
-        url: `${r2.publicUrl.replace(/\/+$/, "")}/${key}`,
+        url: publicAssetUrl(r2.publicUrl, key),
         mimeType: file.type,
         size: file.size,
         createdBy: session.id,

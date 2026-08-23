@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { normalizePublicUrl } from "@/lib/r2";
 
 function handleError(error: unknown) {
   const message = error instanceof Error ? error.message : "Internal server error";
@@ -31,7 +32,7 @@ export async function PUT(
         ...(accessKeyId !== undefined && { accessKeyId }),
         ...(secretAccessKey !== undefined && { secretAccessKey }),
         ...(bucketName !== undefined && { bucketName }),
-        ...(publicUrl !== undefined && { publicUrl: publicUrl.replace(/\/$/, "") }),
+        ...(publicUrl !== undefined && { publicUrl: normalizePublicUrl(publicUrl) }),
       },
     });
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { publicAssetUrl } from "@/lib/r2";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 
 export async function POST(request: NextRequest) {
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest) {
       })
     );
 
-    const url = `${r2Config.publicUrl}/${key}`;
+    const url = publicAssetUrl(r2Config.publicUrl, key);
 
     return NextResponse.json({ url });
   } catch (error) {
