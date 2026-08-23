@@ -106,3 +106,112 @@ export async function generateImageViaCli(opts: {
 
   return { png, svg, width: dims.width, height: dims.height, costUsd: result.costUsd };
 }
+
+// --- Vector art derived from email copy -------------------------------------
+// Rather than asking the user to describe a picture, read the email they are
+// sending and design artwork that matches it. One model call returns the title,
+// alt text and SVG together, so the whole thing costs a single round trip.
+
+export interface VectorFromEmail {
+  png: Buffer;
+  svg: string;
+  title: string;
+  altText: string;
+  width: number;
+  height: number;
+  costUsd: number;
+  engine: string;
+}
+
+function buildEmailArtPrompt(emailText: string, style: string, width: number, height: number): string {
+  return `Read this marketing email and design a single illustration to sit at the top of it.
+
+--- EMAIL ---
+${emailText.slice(0, 6000)}
+--- END EMAIL ---
+
+${STYLE_GUIDANCE[style] ? `Art direction: ${STYLE_GUIDANCE[style]}` : ""}
+
+Decide for yourself what imagery suits the email's subject and tone, then return a JSON object with exactly these keys:
+{
+  "title": "a short filename-style name for the image, 2-5 words, lowercase words separated by spaces",
+  "altText": "one sentence describing the image for screen readers and for when images are blocked",
+  "svg": "the complete SVG markup"
+}
+
+Rules for the SVG:
+- Root element exactly: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
+- Self-contained: no external images, no <image href>, no web fonts, no scripts, no CSS classes — presentation attributes or inline style only.
+- No text or lettering anywhere in the artwork; the email supplies the words.
+- Compose for the full ${width}×${height} canvas, edge to edge.
+- Use gradients, layered shapes and opacity for depth. It should look designed, not like clip art.
+
+Return ONLY the JSON object. No markdown fences, no commentary.`;
+}
+
+/** Tolerant JSON extraction — models sometimes wrap the object in prose or fences. */
+function parseArtJson(text: string): { title?: string; altText?: string; svg?: string } | null {
+  const cleaned = text.replace(/^\s*```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start !== -1 && end > start) {
+      try {
+        return JSON.parse(cleaned.slice(start, end + 1));
+      } catch {
+        // fall through
+      }
+    }
+  }
+  return null;
+}
+
+export async function generateVectorFromEmail(opts: {
+  emailText: string;
+  style?: string;
+  aspect?: string;
+  model?: string;
+  cliPath?: string | null;
+}): Promise<VectorFromEmail> {
+  const dims = SVG_DIMENSIONS[opts.aspect || "banner"] || SVG_DIMENSIONS.banner;
+  const prompt = buildEmailArtPrompt(opts.emailText, opts.style || "hero", dims.width, dims.height);
+
+  const result = await runClaudeCli({
+    prompt,
+    systemPrompt:
+      "You are a senior vector illustrator and art director. You reply with a single raw JSON object and nothing else.",
+    model: opts.model,
+    cliPath: opts.cliPath,
+    timeoutMs: 300_000,
+  });
+
+  const parsed = parseArtJson(result.text);
+  // The SVG may arrive inside the JSON, or the model may have skipped the
+  // envelope and returned bare markup — accept either.
+  const rawSvg = parsed?.svg ? extractSvg(parsed.svg) : extractSvg(result.text);
+  if (!rawSvg) {
+    throw new Error("The model did not return usable SVG. Try again, or shorten the email text.");
+  }
+
+  const svg = sanitizeSvg(rawSvg);
+  let png: Buffer;
+  try {
+    png = Buffer.from(new Resvg(svg, { fitTo: { mode: "width", value: dims.width } }).render().asPng());
+  } catch (e) {
+    throw new Error(
+      `The generated SVG could not be rendered: ${e instanceof Error ? e.message : "unknown error"}`
+    );
+  }
+
+  const title = (parsed?.title || "email illustration").toString().trim().slice(0, 80);
+  const altText = (parsed?.altText || title).toString().trim().slice(0, 300);
+
+  return {
+    png, svg, title, altText,
+    width: dims.width, height: dims.height,
+    costUsd: result.costUsd,
+    engine: "local Claude CLI (vector)",
+  };
+}

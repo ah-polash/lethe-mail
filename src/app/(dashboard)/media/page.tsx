@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Image as ImageIcon, Upload, Search, Trash2, Copy, Check, Loader2,
-  FileText, Film, Code2, Pencil, Sparkles, Wand2,
+  FileText, Film, Code2, Pencil, Sparkles, Wand2, PenTool,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -80,6 +80,14 @@ export default function MediaLibraryPage() {
   const [imageEngineAvailable, setImageEngineAvailable] = useState(true);
   const [cliEngineAvailable, setCliEngineAvailable] = useState(false);
   const [engine, setEngine] = useState<"openrouter" | "cli">("openrouter");
+
+  // Vector-from-email generator
+  const [vecOpen, setVecOpen] = useState(false);
+  const [vecEmailText, setVecEmailText] = useState("");
+  const [vecStyle, setVecStyle] = useState("hero");
+  const [vecAspect, setVecAspect] = useState("banner");
+  const [vecBusy, setVecBusy] = useState(false);
+  const [vecResult, setVecResult] = useState<{ url: string; title: string; altText: string; dimensions: string } | null>(null);
   const [sourceFilter, setSourceFilter] = useState<"all" | "ai" | "upload">("all");
 
   const load = useCallback(async () => {
@@ -110,6 +118,36 @@ export default function MediaLibraryPage() {
       })
       .catch(() => {});
   }, []);
+
+  const generateVector = async () => {
+    if (vecEmailText.trim().length < 40) {
+      toast.error("Paste a bit more of the email so the artwork can match it");
+      return;
+    }
+    setVecBusy(true);
+    setVecResult(null);
+    try {
+      const res = await fetch("/api/media/vector", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emailText: vecEmailText, style: vecStyle, aspect: vecAspect }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Vector generation failed");
+      setVecResult({
+        url: data.asset.url,
+        title: data.title,
+        altText: data.altText,
+        dimensions: data.dimensions,
+      });
+      toast.success("Vector saved to your library");
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Vector generation failed");
+    } finally {
+      setVecBusy(false);
+    }
+  };
 
   const generate = async () => {
     if (!genPrompt.trim()) { toast.error("Describe the image you want"); return; }
@@ -248,6 +286,12 @@ export default function MediaLibraryPage() {
             accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml,application/pdf,video/mp4,video/webm"
             onChange={(e) => { if (e.target.files) uploadFiles(e.target.files); e.target.value = ""; }}
           />
+          {cliEngineAvailable && (
+            <Button variant="outline" onClick={() => setVecOpen(true)} className="gap-2">
+              <PenTool className="h-4 w-4" />
+              AI Vector generator
+            </Button>
+          )}
           <Button variant="outline" onClick={() => setGenOpen(true)} className="gap-2">
             <Sparkles className="h-4 w-4" />
             Generate with AI
@@ -379,6 +423,111 @@ export default function MediaLibraryPage() {
         </div>
       )}
 
+
+
+      {/* Vector art derived from the email copy */}
+      <Dialog open={vecOpen} onOpenChange={(o) => { if (!vecBusy) { setVecOpen(o); if (!o) setVecResult(null); } }}>
+        <DialogContent className="max-w-[95vw] sm:max-w-[95vw] w-[95vw] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <PenTool className="h-5 w-5 text-primary" /> AI Vector generator
+            </DialogTitle>
+            <DialogDescription>
+              Paste your email text. Claude reads it, designs matching artwork, and saves it to your
+              library with a name and alt text — no API credits, exact dimensions.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-5 py-1 lg:grid-cols-[1.4fr_1fr]">
+            <div className="space-y-1.5">
+              <Label>Email text</Label>
+              <Textarea
+                rows={16}
+                autoFocus
+                className="font-mono text-xs"
+                placeholder={"Paste the subject line and body of your email here…\n\nThe illustration is designed from what the email is actually about, so more copy gives a better match."}
+                value={vecEmailText}
+                onChange={(e) => setVecEmailText(e.target.value)}
+                disabled={vecBusy}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                {vecEmailText.trim().length} characters
+                {vecEmailText.trim().length > 0 && vecEmailText.trim().length < 40 && " · paste a little more"}
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Art direction</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { k: "hero", label: "Email hero" },
+                    { k: "illustration", label: "Illustration" },
+                    { k: "background", label: "Background" },
+                    { k: "icon", label: "Icon" },
+                    { k: "product", label: "Product" },
+                  ].map((o) => (
+                    <button
+                      key={o.k}
+                      type="button"
+                      disabled={vecBusy}
+                      onClick={() => setVecStyle(o.k)}
+                      className={cn(
+                        "rounded-full border px-2.5 py-1 text-xs transition-colors",
+                        vecStyle === o.k ? "border-primary bg-primary/10 text-foreground" : "text-muted-foreground hover:bg-accent"
+                      )}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Shape</Label>
+                <Select value={vecAspect} onValueChange={(v) => v && setVecAspect(v)} disabled={vecBusy}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="banner">Email banner — 1200×300</SelectItem>
+                    <SelectItem value="landscape">Landscape — 1200×675</SelectItem>
+                    <SelectItem value="square">Square — 1024×1024</SelectItem>
+                    <SelectItem value="portrait">Portrait — 900×1200</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  Vector art is drawn on this exact canvas, so the size is guaranteed.
+                </p>
+              </div>
+
+              {vecResult ? (
+                <div className="space-y-2 rounded-lg border p-2.5">
+                  <p className="text-xs font-medium">Saved to library</p>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={vecResult.url} alt={vecResult.altText} className="w-full rounded border" />
+                  <p className="text-[11px]"><span className="text-muted-foreground">Name:</span> {vecResult.title}</p>
+                  <p className="text-[11px]"><span className="text-muted-foreground">Alt text:</span> {vecResult.altText}</p>
+                  <p className="text-[11px] text-muted-foreground">{vecResult.dimensions}</p>
+                </div>
+              ) : (
+                <p className="rounded-md border bg-muted/40 p-2.5 text-[11px] text-muted-foreground">
+                  Vector art suits banners, backgrounds, patterns, icons and flat illustration.
+                  It cannot produce photographs or realistic people. Takes around a minute.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVecOpen(false)} disabled={vecBusy}>
+              {vecResult ? "Done" : "Cancel"}
+            </Button>
+            <Button onClick={generateVector} disabled={vecBusy || vecEmailText.trim().length < 40} className="gap-2">
+              {vecBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PenTool className="h-4 w-4" />}
+              {vecBusy ? "Designing…" : vecResult ? "Generate another" : "Generate vector"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* AI image generator */}
       <Dialog open={genOpen} onOpenChange={(o) => !generating && setGenOpen(o)}>
