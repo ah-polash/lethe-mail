@@ -19,6 +19,7 @@ import {
   Layers,
   MessageSquareWarning,
   Megaphone,
+  Image as ImageIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -64,6 +65,7 @@ const navLinks: {
   { href: "/campaigns/swipeone/new", label: "Create Campaign", icon: Globe, exact: true },
   { href: "/sequences", label: "Email Sequence", icon: Mails },
   { href: "/templates", label: "Templates", icon: FileText },
+  { href: "/media", label: "Media Library", icon: ImageIcon },
   { href: "/templates/dynamic", label: "Dynamic Templates", icon: Sparkles, exact: true },
   { href: "/templates/sequence", label: "Sequence Templates", icon: Layers, exact: true },
 ];

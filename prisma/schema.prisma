@@ -26,6 +26,7 @@ model User {
   feedbackReports   FeedbackReport[]
   featureAnnouncements FeatureAnnouncement[]
   featureReactions     FeatureReaction[]
+  mediaAssets          MediaAsset[]
 }
 
 // "What's New" announcements — upcoming/shipped features posted by super
@@ -305,6 +306,25 @@ model AiConfig {
   isActive  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// Media library: files uploaded to R2 and tracked so they can be browsed,
+// re-used across emails and deleted. (The older /api/upload endpoint stores
+// files without a record — those are not listed here.)
+model MediaAsset {
+  id         String   @id @default(uuid())
+  name       String   // display name, editable
+  key        String   @unique // object key in the R2 bucket
+  url        String   // public URL
+  mimeType   String
+  size       Int      // bytes
+  altText    String?  // used when inserting into an email
+  createdBy  String
+  creator    User     @relation(fields: [createdBy], references: [id])
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([createdAt])
 }
 
 model R2Config {

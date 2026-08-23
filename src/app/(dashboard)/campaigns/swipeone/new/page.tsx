@@ -34,6 +34,7 @@ import {
   ArrowLeft,
   Loader2,
   ScrollText,
+  Image as ImageIcon,
   Globe,
   CalendarClock,
   Sparkles,
@@ -74,6 +75,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { MediaPicker } from "@/components/media-picker";
 
 // --- Preview → source mapping -------------------------------------------------
 // Maps the *rendered* text of the preview back to character offsets in the raw
@@ -398,6 +400,29 @@ export function SwipeOneCampaignEditor({
   const codeTextareaRef = useRef<HTMLTextAreaElement>(null);
   // Main HTML editor (left pane) — target for "double-click preview → highlight source".
   const mainCodeRef = useRef<HTMLTextAreaElement>(null);
+
+  // Media library picker (inserts email-safe HTML at the cursor)
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+
+  const insertMediaHtml = (html: string) => {
+    const ta = mainCodeRef.current;
+    if (!ta) {
+      // No editor focus (e.g. block mode) — append instead of losing the insert.
+      setHtmlContent((prev) => prev + "\n" + html);
+      toast.success("Media added to the end of the email");
+      return;
+    }
+    const start = ta.selectionStart ?? ta.value.length;
+    const end = ta.selectionEnd ?? start;
+    const next = ta.value.slice(0, start) + html + ta.value.slice(end);
+    setHtmlContent(next);
+    // Restore the caret just after what we inserted.
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(start + html.length, start + html.length);
+    });
+    toast.success("Media inserted");
+  };
 
   // Search in code
   const [codeSearchOpen, setCodeSearchOpen] = useState(false);
@@ -6088,6 +6113,17 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
                       variant="outline"
                       size="sm"
                       className="h-7 text-xs"
+                      onClick={() => setMediaPickerOpen(true)}
+                      title="Insert an image from the media library"
+                    >
+                      <ImageIcon className="h-3 w-3 mr-1.5" />
+                      Insert media
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs"
                       onClick={openMapVars}
                       disabled={!htmlContent || usedVars.length === 0}
                       title={usedVars.length === 0 ? "No {{variables}} found" : ""}
@@ -7202,6 +7238,12 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
           )}
         </section>
       </div>
+
+      <MediaPicker
+        open={mediaPickerOpen}
+        onOpenChange={setMediaPickerOpen}
+        onInsert={(html) => insertMediaHtml(html)}
+      />
 
       {/* Footer */}
       <div className="flex-shrink-0 flex items-center justify-end px-6 lg:px-8 py-3 border-t bg-background sticky bottom-0 z-20 gap-2">
