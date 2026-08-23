@@ -1,5 +1,6 @@
 import { Resvg } from "@resvg/resvg-js";
 import { runClaudeCli, resolveClaudeCli } from "./claude-cli";
+import { encodeFrames, type OutputFormat } from "./media-animate";
 
 // Claude cannot emit raster images, but it writes SVG well. So: ask the local
 // CLI for SVG markup, then rasterise it here to a PNG — which every email client
@@ -113,17 +114,54 @@ export async function generateImageViaCli(opts: {
 // alt text and SVG together, so the whole thing costs a single round trip.
 
 export interface VectorFromEmail {
-  png: Buffer;
-  svg: string;
+  png: Buffer; // encoded output (PNG, GIF or APNG depending on the format)
+  svg: string; // first frame, kept for reference
   title: string;
   altText: string;
   width: number;
   height: number;
   costUsd: number;
   engine: string;
+  mimeType: string;
+  extension: string;
+  frameCount: number;
 }
 
-function buildEmailArtPrompt(emailText: string, style: string, width: number, height: number): string {
+function buildEmailArtPrompt(
+  emailText: string,
+  style: string,
+  width: number,
+  height: number,
+  frames: number
+): string {
+  if (frames > 1) {
+    return `Read this marketing email and design a short looping animation to sit at the top of it.
+
+--- EMAIL ---
+${emailText.slice(0, 6000)}
+--- END EMAIL ---
+
+${STYLE_GUIDANCE[style] ? `Art direction: ${STYLE_GUIDANCE[style]}` : ""}
+
+Return a JSON object with exactly these keys:
+{
+  "title": "a short filename-style name, 2-5 lowercase words separated by spaces",
+  "altText": "one sentence describing the animation for screen readers",
+  "frames": ["<svg …>…</svg>", "…"]
+}
+
+Rules:
+- Provide exactly ${frames} SVG keyframes that read as one smooth loop: frame ${frames} should lead naturally back into frame 1.
+- Animate deliberately and subtly — drifting shapes, a pulsing glow, a travelling highlight, rotating rays. Keep the composition stable; do not move everything at once.
+- Every frame uses the identical root element: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
+- Do NOT use SMIL (<animate>, <animateTransform>) or CSS animation — the motion must come from the differences between frames.
+- Self-contained: no external images, no web fonts, no scripts, no CSS classes.
+- No text or lettering anywhere; the email supplies the words.
+- Fill the whole ${width}×${height} canvas edge to edge in every frame.
+
+Return ONLY the JSON object. No markdown fences, no commentary.`;
+  }
+
   return `Read this marketing email and design a single illustration to sit at the top of it.
 
 --- EMAIL ---
@@ -174,9 +212,14 @@ export async function generateVectorFromEmail(opts: {
   aspect?: string;
   model?: string;
   cliPath?: string | null;
+  format?: OutputFormat;
+  frames?: number;
 }): Promise<VectorFromEmail> {
   const dims = SVG_DIMENSIONS[opts.aspect || "banner"] || SVG_DIMENSIONS.banner;
-  const prompt = buildEmailArtPrompt(opts.emailText, opts.style || "hero", dims.width, dims.height);
+  const format: OutputFormat = opts.format || "png";
+  // Animation asks the model for keyframes; more frames means a longer wait.
+  const frameCount = format === "png" ? 1 : Math.max(2, Math.min(8, opts.frames ?? 6));
+  const prompt = buildEmailArtPrompt(opts.emailText, opts.style || "hero", dims.width, dims.height, frameCount);
 
   const result = await runClaudeCli({
     prompt,
@@ -187,23 +230,30 @@ export async function generateVectorFromEmail(opts: {
     timeoutMs: 300_000,
   });
 
-  const parsed = parseArtJson(result.text);
-  // The SVG may arrive inside the JSON, or the model may have skipped the
-  // envelope and returned bare markup — accept either.
-  const rawSvg = parsed?.svg ? extractSvg(parsed.svg) : extractSvg(result.text);
-  if (!rawSvg) {
+  const parsed = parseArtJson(result.text) as
+    | { title?: string; altText?: string; svg?: string; frames?: string[] }
+    | null;
+
+  // Accept: a frames array, a single svg field, or bare markup in the reply.
+  const rawFrames: string[] = Array.isArray(parsed?.frames) && parsed!.frames!.length > 0
+    ? parsed!.frames!.map((f) => extractSvg(String(f)) || "").filter(Boolean)
+    : [(parsed?.svg ? extractSvg(parsed.svg) : extractSvg(result.text)) || ""].filter(Boolean);
+
+  if (rawFrames.length === 0) {
     throw new Error("The model did not return usable SVG. Try again, or shorten the email text.");
   }
 
-  const svg = sanitizeSvg(rawSvg);
-  let png: Buffer;
+  const svgFrames = rawFrames.map(sanitizeSvg);
+  let encoded;
   try {
-    png = Buffer.from(new Resvg(svg, { fitTo: { mode: "width", value: dims.width } }).render().asPng());
+    encoded = encodeFrames(svgFrames, format, dims.width);
   } catch (e) {
     throw new Error(
-      `The generated SVG could not be rendered: ${e instanceof Error ? e.message : "unknown error"}`
+      `The generated artwork could not be rendered: ${e instanceof Error ? e.message : "unknown error"}`
     );
   }
+  const png = encoded.buffer;
+  const svg = svgFrames[0];
 
   const title = (parsed?.title || "email illustration").toString().trim().slice(0, 80);
   const altText = (parsed?.altText || title).toString().trim().slice(0, 300);
@@ -213,5 +263,8 @@ export async function generateVectorFromEmail(opts: {
     width: dims.width, height: dims.height,
     costUsd: result.costUsd,
     engine: "local Claude CLI (vector)",
+    mimeType: encoded.mimeType,
+    extension: encoded.extension,
+    frameCount: encoded.frameCount,
   };
 }

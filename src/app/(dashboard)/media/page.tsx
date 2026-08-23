@@ -86,6 +86,8 @@ export default function MediaLibraryPage() {
   const [vecEmailText, setVecEmailText] = useState("");
   const [vecStyle, setVecStyle] = useState("hero");
   const [vecAspect, setVecAspect] = useState("banner");
+  const [vecFormat, setVecFormat] = useState<"png" | "gif" | "apng">("png");
+  const [vecFrames, setVecFrames] = useState("6");
   const [vecBusy, setVecBusy] = useState(false);
   const [vecResult, setVecResult] = useState<{ url: string; title: string; altText: string; dimensions: string } | null>(null);
   const [sourceFilter, setSourceFilter] = useState<"all" | "ai" | "upload">("all");
@@ -130,7 +132,10 @@ export default function MediaLibraryPage() {
       const res = await fetch("/api/media/vector", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ emailText: vecEmailText, style: vecStyle, aspect: vecAspect }),
+        body: JSON.stringify({
+          emailText: vecEmailText, style: vecStyle, aspect: vecAspect,
+          format: vecFormat, frames: Number(vecFrames),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Vector generation failed");
@@ -138,7 +143,7 @@ export default function MediaLibraryPage() {
         url: data.asset.url,
         title: data.title,
         altText: data.altText,
-        dimensions: data.dimensions,
+        dimensions: `${data.dimensions}${data.frameCount > 1 ? ` · ${data.frameCount} frames` : ""}`,
       });
       toast.success("Vector saved to your library");
       await load();
@@ -482,6 +487,49 @@ export default function MediaLibraryPage() {
                   ))}
                 </div>
               </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Output</Label>
+                <div className="grid gap-1.5">
+                  {[
+                    { k: "png" as const, label: "PNG (static)", note: "Renders everywhere — the safe default." },
+                    { k: "gif" as const, label: "Animated GIF", note: "Animates in most clients; Outlook shows frame 1. 256 colours." },
+                    { k: "apng" as const, label: "Animated PNG (APNG)", note: "Full colour, but only Apple Mail animates it." },
+                  ].map((o) => (
+                    <button
+                      key={o.k}
+                      type="button"
+                      disabled={vecBusy}
+                      onClick={() => setVecFormat(o.k)}
+                      className={cn(
+                        "rounded-lg border p-2 text-left transition-colors",
+                        vecFormat === o.k ? "border-primary bg-primary/5" : "hover:bg-accent"
+                      )}
+                    >
+                      <span className="block text-xs font-medium">{o.label}</span>
+                      <span className="block text-[10px] text-muted-foreground">{o.note}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {vecFormat !== "png" && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Frames</Label>
+                  <Select value={vecFrames} onValueChange={(v) => v && setVecFrames(v)} disabled={vecBusy}>
+                    <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {["3", "4", "6", "8"].map((n) => (
+                        <SelectItem key={n} value={n}>{n} frames</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Each frame is drawn separately, so more frames means a smoother loop and a
+                    longer wait.
+                  </p>
+                </div>
+              )}
 
               <div className="space-y-1.5">
                 <Label className="text-xs">Shape</Label>
