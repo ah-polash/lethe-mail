@@ -402,7 +402,12 @@ export function SwipeOneCampaignEditor({
   const [mapVarsOpen, setMapVarsOpen] = useState(false);
   const codeTextareaRef = useRef<HTMLTextAreaElement>(null);
   // How the user wants to build the email: chooser first, then that one interface.
-  const [designMode, setDesignMode] = useState<"" | "ai" | "html" | "library">("");
+  const [designMode, setDesignMode] = useState<"" | "ai" | "html" | "library" | "templatize">("");
+  // "Templatize my email copy" — the words are already written, AI only designs them.
+  const [tzCopy, setTzCopy] = useState("");
+  const [tzInstructions, setTzInstructions] = useState("");
+  const [tzHouseStyle, setTzHouseStyle] = useState("");
+  const [tzBusy, setTzBusy] = useState(false);
 
   // Main HTML editor (left pane) — target for "double-click preview → highlight source".
   const mainCodeRef = useRef<HTMLTextAreaElement>(null);
@@ -725,6 +730,7 @@ export function SwipeOneCampaignEditor({
         setBundleInstruction((prev) => (prev ? prev : v));
         setGuestpostInstruction((prev) => (prev ? prev : v));
         setSupportInstruction((prev) => (prev ? prev : v));
+        setTzHouseStyle(v);
       }
     } catch {
       // optional
@@ -1449,6 +1455,33 @@ Only use these exact variable names. Place them where they make sense — at min
     },
     []
   );
+
+  const handleTemplatize = async () => {
+    if (tzCopy.trim().length < 30) {
+      toast.error("Paste a bit more of the email so it can be laid out properly");
+      return;
+    }
+    setTzBusy(true);
+    try {
+      const res = await fetch("/api/templates/templatize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ copy: tzCopy, instructions: tzInstructions }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not templatize the copy");
+      applyGenerated(data.html || "", data.subject || undefined, data.name || undefined);
+      toast.success(
+        data.appliedHouseStyle
+          ? "Designed with your predefined instruction applied"
+          : "Designed — no predefined instruction is set in Settings → AI"
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not templatize the copy");
+    } finally {
+      setTzBusy(false);
+    }
+  };
 
   const handleGenerateRegular = async () => {
     if (!aiPrompt) {
@@ -3143,13 +3176,19 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
           </div>
           <Separator />
           {designMode === "" ? (
-            <div className="grid gap-3 sm:grid-cols-3 pt-1">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 pt-1">
               {[
                 {
                   key: "ai" as const,
                   icon: <Sparkles className="h-5 w-5" />,
                   title: "Generate with AI",
                   body: "Describe the email or pick a ready-made format — AI writes and designs it for you.",
+                },
+                {
+                  key: "templatize" as const,
+                  icon: <Wand2 className="h-5 w-5" />,
+                  title: "Templatize my email copy",
+                  body: "Already written the email? Paste it and AI designs it in your house style — your words, untouched.",
                 },
                 {
                   key: "html" as const,
@@ -3188,7 +3227,13 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
           ) : (
             <div className="flex items-center gap-2 pt-1">
               <Badge variant="secondary" className="gap-1.5">
-                {designMode === "ai" ? "Generating with AI" : designMode === "html" ? "Your own HTML" : "From template library"}
+                {designMode === "ai"
+                  ? "Generating with AI"
+                  : designMode === "templatize"
+                  ? "Templatizing your copy"
+                  : designMode === "html"
+                  ? "Your own HTML"
+                  : "From template library"}
               </Badge>
               <Button
                 variant="ghost"
@@ -3201,6 +3246,77 @@ ${productLogoUrl ? `- Display the product logo subtly at the top of the email us
             </div>
           )}
 
+
+          {/* Templatize: the copy exists, AI only designs it */}
+          {designMode === "templatize" && (
+            <div className="grid gap-4 pt-1 lg:grid-cols-[1.6fr_1fr]">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Your email copy</Label>
+                <Textarea
+                  rows={18}
+                  autoFocus
+                  className="font-mono text-xs"
+                  placeholder={"Paste the email you have already written.\n\nInclude the subject line if you have one — start that line with \"Subject:\" and it becomes the campaign subject instead of body text."}
+                  value={tzCopy}
+                  onChange={(e) => setTzCopy(e.target.value)}
+                  disabled={tzBusy}
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  {tzCopy.trim().length} characters
+                  {tzCopy.trim().length > 0 && tzCopy.trim().length < 30 && " · paste a little more"}
+                  {" · your wording is preserved — only the layout is designed"}
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <div className="rounded-lg border bg-muted/40 p-3 space-y-1.5">
+                  <p className="text-xs font-medium">Predefined Instruction</p>
+                  {tzHouseStyle ? (
+                    <p className="max-h-32 overflow-y-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
+                      {tzHouseStyle}
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">
+                      Nothing set yet — the design will use sensible defaults.
+                    </p>
+                  )}
+                  <a
+                    href="/settings/ai"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-block text-[11px] text-primary hover:underline"
+                  >
+                    Edit in Settings → AI
+                  </a>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Anything extra for this email? (optional)</Label>
+                  <Textarea
+                    rows={4}
+                    className="text-xs"
+                    placeholder="e.g. put the discount code in a bold box, use a dark header"
+                    value={tzInstructions}
+                    onChange={(e) => setTzInstructions(e.target.value)}
+                    disabled={tzBusy}
+                  />
+                </div>
+
+                <Button
+                  type="button"
+                  className="w-full gap-2"
+                  onClick={handleTemplatize}
+                  disabled={tzBusy || tzCopy.trim().length < 30}
+                >
+                  {tzBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                  {tzBusy ? "Designing…" : "Design my template"}
+                </Button>
+                <p className="text-[11px] text-muted-foreground">
+                  The result opens in the editor below and is saved to your template library.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* AI Generation buttons */}
           {designMode === "ai" && (
